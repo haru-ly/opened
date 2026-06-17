@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OPENED</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- ══════════════════════════════════════════
+       AUTH SCREEN
+  ══════════════════════════════════════════ -->
+  <div id="auth-screen" class="screen active">
+    <div class="auth-container">
+      <div class="auth-brand">
+        <span class="brand-dot"></span>
+        <h1>OPENED</h1>
+        <p class="auth-sub">내부 플랫폼에 오신 것을 환영합니다</p>
+      </div>
+
+      <!-- 로그인 폼 -->
+      <div id="login-form" class="auth-form active">
+        <h2 class="form-title">로그인</h2>
+        <div class="form-group">
+          <label for="login-email">이메일</label>
+          <input type="email" id="login-email" placeholder="이메일 입력" autocomplete="email" />
+        </div>
+        <div class="form-group">
+          <label for="login-password">비밀번호</label>
+          <input type="password" id="login-password" placeholder="비밀번호 입력" autocomplete="current-password" />
+        </div>
+        <div id="login-error" class="form-error hidden"></div>
+        <button class="btn-primary" id="btn-login">로그인</button>
+        <p class="form-switch">계정이 없으신가요? <span class="link" id="goto-register">관리자에게 문의</span></p>
+      </div>
+
+      <!-- 회원가입 폼 (관리자만 사용) -->
+      <div id="register-form" class="auth-form">
+        <h2 class="form-title">멤버 등록</h2>
+        <p class="form-notice">⚠ 관리자 계정으로만 접근 가능합니다</p>
+        <div class="form-group">
+          <label for="reg-name">이름</label>
+          <input type="text" id="reg-name" placeholder="이름 입력" />
+        </div>
+        <div class="form-group">
+          <label for="reg-email">이메일</label>
+          <input type="email" id="reg-email" placeholder="이메일 입력" />
+        </div>
+        <div class="form-group">
+          <label for="reg-password">초기 비밀번호</label>
+          <input type="password" id="reg-password" placeholder="초기 비밀번호 설정" />
+        </div>
+        <div class="form-group">
+          <label for="reg-role">역할</label>
+          <select id="reg-role">
+            <option value="user">일반 멤버</option>
+            <option value="admin">관리자</option>
+          </select>
+        </div>
+        <div id="register-error" class="form-error hidden"></div>
+        <button class="btn-primary" id="btn-register">등록하기</button>
+        <p class="form-switch"><span class="link" id="goto-login">← 로그인으로</span></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       MAIN APP SCREEN
+  ══════════════════════════════════════════ -->
+  <div id="app-screen" class="screen">
+
+    <!-- 사이드바 -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-brand">
+        <span class="brand-dot small"></span>
+        <span>OPENED</span>
+      </div>
+
+      <nav class="sidebar-nav">
+        <button class="nav-item active" data-page="attendance">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          <span>출석체크</span>
+        </button>
+        <button class="nav-item" data-page="lyrics">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 1 0 10 10"/><path d="M9 12l2 2 4-4"/><path d="M15 2v6h6"/></svg>
+          <span>작사본 제출</span>
+        </button>
+        <button class="nav-item" data-page="notice">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+          <span>공지사항</span>
+        </button>
+        <button class="nav-item admin-only hidden" data-page="admin">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          <span>관리자</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="user-info" id="sidebar-user-info">
+          <div class="user-avatar" id="sidebar-avatar">?</div>
+          <div class="user-details">
+            <span class="user-name" id="sidebar-name">—</span>
+            <span class="user-role" id="sidebar-role">—</span>
+          </div>
+        </div>
+        <button class="btn-icon" id="btn-logout" title="로그아웃">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        </button>
+      </div>
+    </aside>
+
+    <!-- 모바일 사이드바 토글 -->
+    <button class="sidebar-toggle" id="sidebar-toggle">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    </button>
+
+    <!-- 메인 콘텐츠 -->
+    <main class="main-content">
+
+      <!-- ── 출석체크 페이지 ── -->
+      <section id="page-attendance" class="page active">
+        <div class="page-header">
+          <h2 class="page-title">출석체크</h2>
+          <div class="page-meta" id="attendance-stats"></div>
+        </div>
+        <div class="card calendar-card">
+          <div class="calendar-nav">
+            <button class="btn-icon" id="cal-prev">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
+            <span class="calendar-month" id="cal-month-label"></span>
+            <button class="btn-icon" id="cal-next">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+          </div>
+          <div class="calendar-days-header">
+            <span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span>
+          </div>
+          <div class="calendar-grid" id="calendar-grid"></div>
+        </div>
+        <div class="card attendance-log-card">
+          <h3 class="card-title">출석 기록</h3>
+          <div id="attendance-log-list" class="log-list"></div>
+        </div>
+      </section>
+
+      <!-- ── 작사본 제출 페이지 ── -->
+      <section id="page-lyrics" class="page">
+        <div class="page-header">
+          <h2 class="page-title">작사본 제출</h2>
+          <button class="btn-primary small admin-only hidden" id="btn-add-assignment">+ 과제 등록</button>
+        </div>
+
+        <!-- 과제 목록 -->
+        <div id="assignments-list" class="assignments-grid"></div>
+
+        <!-- 제출 모달 -->
+        <div id="modal-submit-lyrics" class="modal hidden">
+          <div class="modal-backdrop" id="close-lyrics-modal"></div>
+          <div class="modal-box">
+            <div class="modal-header">
+              <h3 id="modal-lyrics-title">작사본 제출</h3>
+              <button class="btn-icon" id="close-lyrics-modal-btn">✕</button>
+            </div>
+            <p class="modal-meta" id="modal-lyrics-meta"></p>
+            <div class="form-group">
+              <label>1절 작사본</label>
+              <textarea id="lyrics-content" rows="10" placeholder="1절 가사를 입력하세요..."></textarea>
+            </div>
+            <div id="lyrics-error" class="form-error hidden"></div>
+            <div class="modal-actions">
+              <button class="btn-secondary" id="cancel-lyrics">취소</button>
+              <button class="btn-primary" id="submit-lyrics">제출하기</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 관리자 과제 등록 모달 -->
+        <div id="modal-add-assignment" class="modal hidden">
+          <div class="modal-backdrop"></div>
+          <div class="modal-box">
+            <div class="modal-header">
+              <h3>과제 등록</h3>
+              <button class="btn-icon" id="close-assignment-modal">✕</button>
+            </div>
+            <div class="form-group">
+              <label>주제</label>
+              <input type="text" id="assignment-topic" placeholder="예: 봄, 이별, 희망..." />
+            </div>
+            <div class="form-group">
+              <label>제출 마감일</label>
+              <input type="date" id="assignment-deadline" />
+            </div>
+            <div class="form-group">
+              <label>설명 (선택)</label>
+              <textarea id="assignment-desc" rows="3" placeholder="과제 설명 입력..."></textarea>
+            </div>
+            <div id="assignment-error" class="form-error hidden"></div>
+            <div class="modal-actions">
+              <button class="btn-secondary" id="cancel-assignment">취소</button>
+              <button class="btn-primary" id="save-assignment">등록</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── 공지사항 페이지 ── -->
+      <section id="page-notice" class="page">
+        <div class="page-header">
+          <h2 class="page-title">공지사항</h2>
+          <button class="btn-primary small admin-only hidden" id="btn-add-notice">+ 공지 작성</button>
+        </div>
+
+        <div id="notice-list" class="notice-list"></div>
+
+        <!-- 공지 상세 모달 -->
+        <div id="modal-notice-detail" class="modal hidden">
+          <div class="modal-backdrop" id="close-notice-detail-backdrop"></div>
+          <div class="modal-box wide">
+            <div class="modal-header">
+              <h3 id="notice-detail-title"></h3>
+              <button class="btn-icon" id="close-notice-detail-btn">✕</button>
+            </div>
+            <p class="notice-detail-meta" id="notice-detail-meta"></p>
+            <p class="notice-detail-body" id="notice-detail-body"></p>
+            <div class="comment-section">
+              <h4>댓글</h4>
+              <div id="comment-list" class="comment-list"></div>
+              <div class="comment-input-row">
+                <input type="text" id="comment-input" placeholder="댓글을 입력하세요..." />
+                <button class="btn-primary small" id="btn-submit-comment">등록</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 공지 작성 모달 -->
+        <div id="modal-add-notice" class="modal hidden">
+          <div class="modal-backdrop"></div>
+          <div class="modal-box">
+            <div class="modal-header">
+              <h3>공지 작성</h3>
+              <button class="btn-icon" id="close-add-notice-modal">✕</button>
+            </div>
+            <div class="form-group">
+              <label>제목</label>
+              <input type="text" id="notice-title-input" placeholder="공지 제목" />
+            </div>
+            <div class="form-group">
+              <label>내용</label>
+              <textarea id="notice-body-input" rows="6" placeholder="공지 내용을 입력하세요..."></textarea>
+            </div>
+            <div id="notice-error" class="form-error hidden"></div>
+            <div class="modal-actions">
+              <button class="btn-secondary" id="cancel-notice">취소</button>
+              <button class="btn-primary" id="save-notice">등록</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── 관리자 페이지 ── -->
+      <section id="page-admin" class="page">
+        <div class="page-header">
+          <h2 class="page-title">관리자 대시보드</h2>
+          <button class="btn-primary small" id="btn-open-register">+ 멤버 등록</button>
+        </div>
+
+        <!-- 탭 -->
+        <div class="admin-tabs">
+          <button class="admin-tab active" data-tab="members">멤버 목록</button>
+          <button class="admin-tab" data-tab="attendance-admin">출석 현황</button>
+          <button class="admin-tab" data-tab="lyrics-admin">작사본 현황</button>
+          <button class="admin-tab" data-tab="alerts">알림</button>
+        </div>
+
+        <!-- 멤버 목록 탭 -->
+        <div id="admin-tab-members" class="admin-tab-content active">
+          <div class="card">
+            <table class="data-table" id="members-table">
+              <thead>
+                <tr>
+                  <th>이름</th>
+                  <th>이메일</th>
+                  <th>역할</th>
+                  <th>가입일</th>
+                  <th>마지막 접속</th>
+                  <th>상태</th>
+                </tr>
+              </thead>
+              <tbody id="members-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- 출석 현황 탭 -->
+        <div id="admin-tab-attendance-admin" class="admin-tab-content">
+          <div id="admin-attendance-list" class="admin-attendance-list"></div>
+        </div>
+
+        <!-- 작사본 현황 탭 -->
+        <div id="admin-tab-lyrics-admin" class="admin-tab-content">
+          <div id="admin-lyrics-list" class="admin-lyrics-list"></div>
+        </div>
+
+        <!-- 알림 탭 -->
+        <div id="admin-tab-alerts" class="admin-tab-content">
+          <div class="card">
+            <h3 class="card-title">⚠ 1주일 이상 미접속 멤버</h3>
+            <div id="inactive-members-list" class="log-list"></div>
+          </div>
+        </div>
+
+        <!-- 멤버 등록 모달 -->
+        <div id="modal-register-member" class="modal hidden">
+          <div class="modal-backdrop"></div>
+          <div class="modal-box">
+            <div class="modal-header">
+              <h3>멤버 등록</h3>
+              <button class="btn-icon" id="close-register-modal">✕</button>
+            </div>
+            <div class="form-group">
+              <label>이름</label>
+              <input type="text" id="admin-reg-name" placeholder="이름" />
+            </div>
+            <div class="form-group">
+              <label>이메일</label>
+              <input type="email" id="admin-reg-email" placeholder="이메일" />
+            </div>
+            <div class="form-group">
+              <label>초기 비밀번호</label>
+              <input type="password" id="admin-reg-password" placeholder="초기 비밀번호" />
+            </div>
+            <div class="form-group">
+              <label>역할</label>
+              <select id="admin-reg-role">
+                <option value="user">일반 멤버</option>
+                <option value="admin">관리자</option>
+              </select>
+            </div>
+            <div id="admin-register-error" class="form-error hidden"></div>
+            <div class="modal-actions">
+              <button class="btn-secondary" id="cancel-register-member">취소</button>
+              <button class="btn-primary" id="save-register-member">등록</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── 비밀번호 변경 페이지 (설정) ── -->
+      <section id="page-settings" class="page">
+        <div class="page-header">
+          <h2 class="page-title">설정</h2>
+        </div>
+        <div class="card settings-card">
+          <h3 class="card-title">비밀번호 변경</h3>
+          <div class="form-group">
+            <label>현재 비밀번호</label>
+            <input type="password" id="current-password" placeholder="현재 비밀번호" />
+          </div>
+          <div class="form-group">
+            <label>새 비밀번호</label>
+            <input type="password" id="new-password" placeholder="새 비밀번호" />
+          </div>
+          <div class="form-group">
+            <label>새 비밀번호 확인</label>
+            <input type="password" id="confirm-password" placeholder="새 비밀번호 확인" />
+          </div>
+          <div id="pw-change-error" class="form-error hidden"></div>
+          <div id="pw-change-success" class="form-success hidden">✓ 비밀번호가 변경되었습니다</div>
+          <button class="btn-primary" id="btn-change-password">변경하기</button>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- 설정 버튼 (우하단 고정) -->
+    <button class="floating-settings" id="btn-open-settings" title="설정">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+      </svg>
+    </button>
+
+  </div>
+
+  <!-- 토스트 알림 -->
+  <div id="toast" class="toast hidden"></div>
+
+  <!-- Firebase SDK -->
+  <script type="module" src="app.js"></script>
+</body>
+</html>
