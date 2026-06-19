@@ -45,6 +45,11 @@ let calMonth      = new Date().getMonth();
 let activeNoticeId= null;
 let unsubNotices  = null;
 let unsubComments = null;
+let unsubChat     = null;   // 현재 열린 채팅방 메시지 구독
+let unsubThreads  = null;   // 관리자: 대화 목록 구독
+let unsubUnread   = null;   // 안 읽은 메시지 뱃지 구독
+let activeChatUid = null;   // 관리자가 보고 있는 멤버 uid
+let editingNoticeId = null; // 수정 중인 공지 id
 
 // ════════════════════════════════════════════════
 //  UTILS
@@ -90,6 +95,14 @@ onAuthStateChanged(auth, async (user) => {
   if (user) {
     currentUser = user;
     await loadProfile(user.uid);
+
+    // 비활성화된 계정이면 강제 로그아웃
+    if (currentProfile?.disabled) {
+      showToast('🚫 비활성화된 계정입니다. 관리자에게 문의하세요.', 4000);
+      await signOut(auth);
+      return;
+    }
+
     await updateLastSeen(user.uid);
     showApp();
   } else {
@@ -127,6 +140,8 @@ function showAuthScreen() {
   $('app-screen').classList.remove('active');
   if (unsubNotices) { unsubNotices(); unsubNotices = null; }
   if (unsubComments) { unsubComments(); unsubComments = null; }
+  if (unsubChat) { unsubChat(); unsubChat = null; }
+  if (unsubThreads) { unsubThreads(); unsubThreads = null; }
 }
 
 function showApp() {
@@ -146,8 +161,22 @@ function showApp() {
     isAdmin ? el.classList.remove('hidden') : el.classList.add('hidden');
   });
 
+  // 채팅 메뉴 라벨 조정
+  $('chat-nav-label').textContent = isAdmin ? '1:1 채팅' : '관리자에게 문의';
+  $('chat-page-title').textContent = isAdmin ? '1:1 채팅' : '관리자에게 문의';
+  if (isAdmin) {
+    $('chat-user-view').classList.add('hidden');
+    $('chat-admin-view').classList.remove('hidden');
+  } else {
+    $('chat-user-view').classList.remove('hidden');
+    $('chat-admin-view').classList.add('hidden');
+  }
+
   // 기본 페이지 로드
   navigateTo('attendance');
+
+  // 안 읽은 메시지 뱃지 구독 시작
+  subscribeUnreadBadge();
 }
 
 // ════════════════════════════════════════════════
@@ -166,6 +195,7 @@ function navigateTo(page) {
   if (page === 'attendance') loadAttendancePage();
   if (page === 'lyrics')     loadLyricsPage();
   if (page === 'notice')     loadNoticePage();
+  if (page === 'chat')       loadChatPage();
   if (page === 'admin')      loadAdminPage();
   if (page === 'settings')   {}  // 정적
 
@@ -608,6 +638,219 @@ $('save-notice').addEventListener('click', async () => {
   }
 });
 
+// 공지 수정 (관리자)
+$('btn-edit-notice')?.addEventListener('click', async () => {
+  if (!activeNoticeId) return;
+  const snap = await getDoc(doc(db, 'notices', activeNoticeId));
+  if (!snap.exists()) return;
+  const n = snap.data();
+  editingNoticeId = activeNoticeId;
+  $('edit-notice-title-input').value = n.title || '';
+  $('edit-notice-body-input').value  = n.body  || '';
+  hide('edit-notice-error');
+  hide('modal-notice-detail');
+  show('modal-edit-notice');
+  $('modal-edit-notice').classList.remove('hidden');
+});
+
+['close-edit-notice-modal', 'cancel-edit-notice'].forEach(id => {
+  $(id)?.addEventListener('click', () => { hide('modal-edit-notice'); editingNoticeId = null; });
+});
+
+$('save-edit-notice').addEventListener('click', async () => {
+  const title = $('edit-notice-title-input').value.trim();
+  const body  = $('edit-notice-body-input').value.trim();
+  if (!title || !body) return showError('edit-notice-error', '제목과 내용을 입력하세요.');
+  if (!editingNoticeId) return;
+  try {
+    await updateDoc(doc(db, 'notices', editingNoticeId), {
+      title,
+      body,
+      editedAt: serverTimestamp(),
+    });
+    hide('modal-edit-notice');
+    editingNoticeId = null;
+    showToast('✏️ 공지가 수정되었습니다.');
+  } catch (e) {
+    showError('edit-notice-error', '수정 실패: ' + e.message);
+  }
+});
+
+// 공지 삭제 (관리자)
+$('btn-delete-notice')?.addEventListener('click', async () => {
+  if (!activeNoticeId) return;
+  if (!confirm('이 공지를 삭제하시겠습니까? 댓글도 함께 삭제됩니다.')) return;
+  try {
+    // 하위 댓글 먼저 삭제
+    const commentsSnap = await getDocs(collection(db, 'notices', activeNoticeId, 'comments'));
+    await Promise.all(commentsSnap.docs.map(d => deleteDoc(d.ref)));
+    await deleteDoc(doc(db, 'notices', activeNoticeId));
+    hide('modal-notice-detail');
+    if (unsubComments) { unsubComments(); unsubComments = null; }
+    activeNoticeId = null;
+    showToast('🗑️ 공지가 삭제되었습니다.');
+  } catch (e) {
+    showToast('삭제 실패: ' + e.message, 3500);
+  }
+});
+
+// ════════════════════════════════════════════════
+//  1:1 CHAT (관리자 ↔ 멤버)
+//  구조: chats/{memberUid}/messages/{msgId}
+//        chats/{memberUid} 문서 자체는 메타(lastMessage, lastAt, unread 등) 보관
+// ════════════════════════════════════════════════
+
+function loadChatPage() {
+  const isAdmin = currentProfile?.role === 'admin';
+  if (isAdmin) {
+    loadChatThreadList();
+  } else {
+    openChatRoom(currentUser.uid, false);
+  }
+}
+
+// ── 멤버용: 본인-관리자 채팅방 열기 ──
+function openChatRoom(memberUid, isAdminView, memberName) {
+  const messagesEl = isAdminView ? $('chat-messages-admin') : $('chat-messages-user');
+  messagesEl.innerHTML = '';
+
+  if (unsubChat) { unsubChat(); unsubChat = null; }
+
+  unsubChat = onSnapshot(
+    query(collection(db, 'chats', memberUid, 'messages'), orderBy('createdAt', 'asc')),
+    (snap) => {
+      messagesEl.innerHTML = '';
+      snap.forEach(d => {
+        const m = d.data();
+        const mine = m.senderUid === currentUser.uid;
+        const bubble = document.createElement('div');
+        bubble.className = `chat-bubble ${mine ? 'mine' : 'theirs'}`;
+        bubble.innerHTML = `${escapeHtml(m.text)}<span class="chat-bubble-time">${formatDateTime(m.createdAt)}</span>`;
+        messagesEl.appendChild(bubble);
+      });
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+  );
+
+  // 읽음 처리: 내가 이 방을 보고 있다는 표시
+  const readField = isAdminView ? 'adminUnread' : 'userUnread';
+  setDoc(doc(db, 'chats', memberUid), { [readField]: 0 }, { merge: true }).catch(() => {});
+
+  if (isAdminView) {
+    activeChatUid = memberUid;
+    $('chat-admin-header').textContent = memberName || '대화 중';
+    $('chat-input-admin').disabled = false;
+    $('btn-send-chat-admin').disabled = false;
+  }
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str || '';
+  return div.innerHTML;
+}
+
+// ── 멤버용 전송 ──
+async function sendChatMessage(memberUid, text, isAdminView) {
+  if (!text.trim()) return;
+  await addDoc(collection(db, 'chats', memberUid, 'messages'), {
+    senderUid:  currentUser.uid,
+    senderName: currentProfile?.name || '—',
+    senderRole: currentProfile?.role || 'user',
+    text:       text.trim(),
+    createdAt:  serverTimestamp(),
+  });
+
+  const unreadField = isAdminView ? 'userUnread' : 'adminUnread'; // 상대방 쪽 unread 증가
+  await setDoc(doc(db, 'chats', memberUid), {
+    lastMessage: text.trim(),
+    lastAt: serverTimestamp(),
+    memberUid,
+    memberName: isAdminView ? ($('chat-admin-header').textContent) : (currentProfile?.name || '—'),
+    [unreadField]: 1, // 단순화: 1로 마킹 (정확한 카운트 대신 "안읽음 있음" 플래그로 사용)
+  }, { merge: true });
+}
+
+$('btn-send-chat-user').addEventListener('click', () => {
+  const input = $('chat-input-user');
+  sendChatMessage(currentUser.uid, input.value, false);
+  input.value = '';
+});
+$('chat-input-user').addEventListener('keydown', e => {
+  if (e.key === 'Enter') $('btn-send-chat-user').click();
+});
+
+$('btn-send-chat-admin').addEventListener('click', () => {
+  if (!activeChatUid) return;
+  const input = $('chat-input-admin');
+  sendChatMessage(activeChatUid, input.value, true);
+  input.value = '';
+});
+$('chat-input-admin').addEventListener('keydown', e => {
+  if (e.key === 'Enter') $('btn-send-chat-admin').click();
+});
+
+// ── 관리자용: 대화 목록 ──
+function loadChatThreadList() {
+  const container = $('chat-thread-items');
+  if (unsubThreads) unsubThreads();
+
+  unsubThreads = onSnapshot(
+    query(collection(db, 'chats'), orderBy('lastAt', 'desc')),
+    (snap) => {
+      if (snap.empty) {
+        container.innerHTML = '<div class="empty-state">아직 대화가 없습니다.</div>';
+        return;
+      }
+      container.innerHTML = '';
+      snap.forEach(d => {
+        const t = d.data();
+        const memberUid = d.id;
+        const hasUnread = (t.adminUnread || 0) > 0;
+        const item = document.createElement('div');
+        item.className = `chat-thread-item${activeChatUid === memberUid ? ' active' : ''}`;
+        item.innerHTML = `
+          <div class="chat-thread-avatar">${(t.memberName || '?')[0]}</div>
+          <div class="chat-thread-info">
+            <div class="chat-thread-name">${t.memberName || memberUid}</div>
+            <div class="chat-thread-preview">${t.lastMessage || ''}</div>
+          </div>
+          ${hasUnread ? '<span class="nav-badge">N</span>' : ''}`;
+        item.addEventListener('click', () => {
+          document.querySelectorAll('.chat-thread-item').forEach(el => el.classList.remove('active'));
+          item.classList.add('active');
+          openChatRoom(memberUid, true, t.memberName);
+        });
+        container.appendChild(item);
+      });
+    }
+  );
+}
+
+// ── 사이드바 안 읽은 메시지 뱃지 ──
+function subscribeUnreadBadge() {
+  if (unsubUnread) unsubUnread();
+  const isAdmin = currentProfile?.role === 'admin';
+  const badge = $('chat-unread-badge');
+
+  if (isAdmin) {
+    // 관리자: 모든 채팅방 중 adminUnread > 0 인 게 있으면 표시
+    unsubUnread = onSnapshot(collection(db, 'chats'), (snap) => {
+      let count = 0;
+      snap.forEach(d => { if ((d.data().adminUnread || 0) > 0) count++; });
+      if (count > 0) { badge.textContent = count; badge.classList.remove('hidden'); }
+      else badge.classList.add('hidden');
+    });
+  } else {
+    // 멤버: 본인 채팅방의 userUnread 확인
+    unsubUnread = onSnapshot(doc(db, 'chats', currentUser.uid), (snap) => {
+      const unread = snap.exists() ? (snap.data().userUnread || 0) : 0;
+      if (unread > 0) { badge.textContent = unread; badge.classList.remove('hidden'); }
+      else badge.classList.add('hidden');
+    }, () => { badge.classList.add('hidden'); });
+  }
+}
+
 // ════════════════════════════════════════════════
 //  ADMIN PAGE
 // ════════════════════════════════════════════════
@@ -635,14 +878,19 @@ async function loadAdminTab(tab) {
 
 async function loadMembersTable() {
   const tbody = $('members-tbody');
-  tbody.innerHTML = '<tr><td colspan="6" style="color:var(--text-mute)">로딩 중...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="7" style="color:var(--text-mute)">로딩 중...</td></tr>';
   const snap = await getDocs(query(collection(db, 'users'), orderBy('createdAt', 'desc')));
-  if (snap.empty) { tbody.innerHTML = '<tr><td colspan="6" class="empty-state">멤버 없음</td></tr>'; return; }
+  if (snap.empty) { tbody.innerHTML = '<tr><td colspan="7" class="empty-state">멤버 없음</td></tr>'; return; }
 
   tbody.innerHTML = '';
+  let visibleCount = 0;
   snap.forEach(d => {
     const u = d.data();
+    if (u.disabled) return; // 삭제(비활성화)된 멤버는 목록에서 숨김
+    visibleCount++;
+    const uid = d.id;
     const inactive = daysDiff(u.lastSeen) >= 7;
+    const isSelf = uid === currentUser.uid;
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td>${u.name || '—'}</td>
@@ -650,10 +898,73 @@ async function loadMembersTable() {
       <td><span class="badge ${u.role === 'admin' ? 'badge-accent' : 'badge-muted'}">${u.role === 'admin' ? '관리자' : '멤버'}</span></td>
       <td style="color:var(--text-sub)">${formatDate(u.createdAt)}</td>
       <td style="color:var(--text-sub)">${formatDate(u.lastSeen)}</td>
-      <td><span class="badge ${inactive ? 'badge-red' : 'badge-green'}">${inactive ? '미접속' : '활성'}</span></td>`;
+      <td><span class="badge ${inactive ? 'badge-red' : 'badge-green'}">${inactive ? '미접속' : '활성'}</span></td>
+      <td>
+        <div class="row-actions">
+          <button class="btn-icon btn-chat-member" title="채팅" data-uid="${uid}" data-name="${u.name || ''}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+          </button>
+          ${isSelf ? '' : `
+          <button class="btn-icon danger btn-delete-member" title="삭제" data-uid="${uid}" data-name="${u.name || u.email}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+          </button>`}
+        </div>
+      </td>`;
     tbody.appendChild(tr);
   });
+
+  if (visibleCount === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty-state">멤버 없음</td></tr>';
+    return;
+  }
+
+  // 채팅 바로가기
+  tbody.querySelectorAll('.btn-chat-member').forEach(btn => {
+    btn.addEventListener('click', () => {
+      navigateTo('chat');
+      setTimeout(() => openChatRoom(btn.dataset.uid, true, btn.dataset.name), 50);
+    });
+  });
+
+  // 삭제(비활성화)
+  tbody.querySelectorAll('.btn-delete-member').forEach(btn => {
+    btn.addEventListener('click', () => {
+      $('confirm-delete-member-text').textContent = `"${btn.dataset.name}" 님을 삭제하시겠습니까?`;
+      $('modal-confirm-delete-member').dataset.targetUid = btn.dataset.uid;
+      show('modal-confirm-delete-member');
+      $('modal-confirm-delete-member').classList.remove('hidden');
+    });
+  });
 }
+
+['close-confirm-delete-modal', 'cancel-delete-member'].forEach(id => {
+  $(id)?.addEventListener('click', () => hide('modal-confirm-delete-member'));
+});
+
+$('confirm-delete-member').addEventListener('click', async () => {
+  const targetUid = $('modal-confirm-delete-member').dataset.targetUid;
+  if (!targetUid) return;
+  if (targetUid === currentUser.uid) {
+    showToast('본인 계정은 삭제할 수 없습니다.');
+    hide('modal-confirm-delete-member');
+    return;
+  }
+  try {
+    // Auth 계정은 클라이언트 권한상 직접 삭제 불가 → 문서를 비활성화 상태로 남겨
+    // 다음 로그인 시 차단되도록 처리 (문서를 완전히 지우면 로그인 시 프로필이
+    // 자동 재생성되어 비활성화가 풀리므로, 삭제하지 않고 disabled만 표시)
+    await setDoc(doc(db, 'users', targetUid), {
+      disabled: true,
+      disabledAt: serverTimestamp(),
+      role: 'disabled', // 목록/대시보드 노출에서 제외하기 위한 표시
+    }, { merge: true });
+    hide('modal-confirm-delete-member');
+    showToast('🗑️ 멤버가 삭제(비활성화)되었습니다.');
+    loadMembersTable();
+  } catch (e) {
+    showToast('삭제 실패: ' + e.message, 3500);
+  }
+});
 
 async function loadAdminAttendance() {
   const container = $('admin-attendance-list');

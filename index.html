@@ -93,6 +93,11 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
           <span>공지사항</span>
         </button>
+        <button class="nav-item" data-page="chat">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+          <span id="chat-nav-label">관리자에게 문의</span>
+          <span class="nav-badge hidden" id="chat-unread-badge"></span>
+        </button>
         <button class="nav-item admin-only hidden" data-page="admin">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
           <span>관리자</span>
@@ -223,7 +228,15 @@
           <div class="modal-box wide">
             <div class="modal-header">
               <h3 id="notice-detail-title"></h3>
-              <button class="btn-icon" id="close-notice-detail-btn">✕</button>
+              <div class="modal-header-actions">
+                <button class="btn-icon admin-only hidden" id="btn-edit-notice" title="수정">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+                </button>
+                <button class="btn-icon admin-only hidden" id="btn-delete-notice" title="삭제">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+                </button>
+                <button class="btn-icon" id="close-notice-detail-btn">✕</button>
+              </div>
             </div>
             <p class="notice-detail-meta" id="notice-detail-meta"></p>
             <p class="notice-detail-body" id="notice-detail-body"></p>
@@ -234,6 +247,30 @@
                 <input type="text" id="comment-input" placeholder="댓글을 입력하세요..." />
                 <button class="btn-primary small" id="btn-submit-comment">등록</button>
               </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 공지 수정 모달 -->
+        <div id="modal-edit-notice" class="modal hidden">
+          <div class="modal-backdrop"></div>
+          <div class="modal-box">
+            <div class="modal-header">
+              <h3>공지 수정</h3>
+              <button class="btn-icon" id="close-edit-notice-modal">✕</button>
+            </div>
+            <div class="form-group">
+              <label>제목</label>
+              <input type="text" id="edit-notice-title-input" placeholder="공지 제목" />
+            </div>
+            <div class="form-group">
+              <label>내용</label>
+              <textarea id="edit-notice-body-input" rows="6" placeholder="공지 내용을 입력하세요..."></textarea>
+            </div>
+            <div id="edit-notice-error" class="form-error hidden"></div>
+            <div class="modal-actions">
+              <button class="btn-secondary" id="cancel-edit-notice">취소</button>
+              <button class="btn-primary" id="save-edit-notice">저장</button>
             </div>
           </div>
         </div>
@@ -258,6 +295,40 @@
             <div class="modal-actions">
               <button class="btn-secondary" id="cancel-notice">취소</button>
               <button class="btn-primary" id="save-notice">등록</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── 1:1 채팅 페이지 ── -->
+      <section id="page-chat" class="page">
+        <div class="page-header">
+          <h2 class="page-title" id="chat-page-title">관리자에게 문의</h2>
+        </div>
+
+        <!-- 일반 멤버: 단일 채팅창 -->
+        <div id="chat-user-view" class="chat-layout">
+          <div class="card chat-window">
+            <div class="chat-messages" id="chat-messages-user"></div>
+            <div class="chat-input-row">
+              <input type="text" id="chat-input-user" placeholder="메시지를 입력하세요..." />
+              <button class="btn-primary small" id="btn-send-chat-user">전송</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 관리자: 대화 목록 + 채팅창 -->
+        <div id="chat-admin-view" class="chat-layout admin-chat-layout hidden">
+          <div class="card chat-thread-list">
+            <h3 class="card-title">대화 목록</h3>
+            <div id="chat-thread-items"></div>
+          </div>
+          <div class="card chat-window">
+            <div class="chat-window-header" id="chat-admin-header">대화를 선택하세요</div>
+            <div class="chat-messages" id="chat-messages-admin"></div>
+            <div class="chat-input-row">
+              <input type="text" id="chat-input-admin" placeholder="메시지를 입력하세요..." disabled />
+              <button class="btn-primary small" id="btn-send-chat-admin" disabled>전송</button>
             </div>
           </div>
         </div>
@@ -290,6 +361,7 @@
                   <th>가입일</th>
                   <th>마지막 접속</th>
                   <th>상태</th>
+                  <th>관리</th>
                 </tr>
               </thead>
               <tbody id="members-tbody"></tbody>
@@ -346,6 +418,23 @@
             <div class="modal-actions">
               <button class="btn-secondary" id="cancel-register-member">취소</button>
               <button class="btn-primary" id="save-register-member">등록</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 멤버 삭제 확인 모달 -->
+        <div id="modal-confirm-delete-member" class="modal hidden">
+          <div class="modal-backdrop"></div>
+          <div class="modal-box">
+            <div class="modal-header">
+              <h3>멤버 삭제</h3>
+              <button class="btn-icon" id="close-confirm-delete-modal">✕</button>
+            </div>
+            <p class="modal-meta" id="confirm-delete-member-text"></p>
+            <p class="form-notice">⚠ 계정은 비활성화되어 로그인이 차단되고, 목록에서 제거됩니다. 이 작업은 되돌릴 수 없습니다.</p>
+            <div class="modal-actions">
+              <button class="btn-secondary" id="cancel-delete-member">취소</button>
+              <button class="btn-primary danger" id="confirm-delete-member">삭제</button>
             </div>
           </div>
         </div>
