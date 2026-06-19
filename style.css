@@ -1166,6 +1166,7 @@ input, textarea, select, button {
   font-size: 13px;
   line-height: 1.5;
   word-break: break-word;
+  position: relative;
 }
 
 .chat-bubble.mine {
@@ -1182,12 +1183,62 @@ input, textarea, select, button {
   border-bottom-left-radius: 4px;
 }
 
+.chat-bubble.deleted {
+  background: transparent;
+  border: 1px dashed var(--border);
+}
+
+.chat-deleted-text {
+  font-size: 12px;
+  color: var(--text-mute);
+  font-style: italic;
+}
+
+.chat-edited-tag {
+  font-size: 10px;
+  opacity: 0.65;
+}
+
 .chat-bubble-time {
   font-size: 10px;
   color: var(--text-mute);
   margin-top: 4px;
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
+
+.chat-bubble.mine .chat-bubble-time { color: rgba(26,36,32,0.55); }
+
+.chat-read-status {
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.chat-bubble-actions {
+  display: none;
+  gap: 8px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(0,0,0,0.08);
+}
+
+.chat-bubble:hover .chat-bubble-actions {
+  display: flex;
+}
+
+.chat-action-btn {
+  background: none;
+  border: none;
+  font-size: 11px;
+  font-weight: 600;
+  color: inherit;
+  opacity: 0.7;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+.chat-action-btn:hover { opacity: 1; }
 
 .chat-input-row {
   display: flex;

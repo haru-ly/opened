@@ -431,10 +431,37 @@
               <button class="btn-icon" id="close-confirm-delete-modal">✕</button>
             </div>
             <p class="modal-meta" id="confirm-delete-member-text"></p>
-            <p class="form-notice">⚠ 계정은 비활성화되어 로그인이 차단되고, 목록에서 제거됩니다. 이 작업은 되돌릴 수 없습니다.</p>
+            <p class="form-notice">⚠ 계정과 출석/작사본/채팅/댓글 등 모든 관련 기록이 영구 삭제됩니다. 이 작업은 되돌릴 수 없습니다.</p>
             <div class="modal-actions">
               <button class="btn-secondary" id="cancel-delete-member">취소</button>
               <button class="btn-primary danger" id="confirm-delete-member">삭제</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 멤버 차단(기간제) 모달 -->
+        <div id="modal-suspend-member" class="modal hidden">
+          <div class="modal-backdrop"></div>
+          <div class="modal-box">
+            <div class="modal-header">
+              <h3>멤버 차단</h3>
+              <button class="btn-icon" id="close-suspend-modal">✕</button>
+            </div>
+            <p class="modal-meta" id="suspend-member-text"></p>
+            <div class="form-group">
+              <label>차단 기간</label>
+              <select id="suspend-duration">
+                <option value="1">1일</option>
+                <option value="3">3일</option>
+                <option value="7" selected>7일</option>
+                <option value="30">30일</option>
+                <option value="0">영구 차단 (직접 해제 전까지)</option>
+              </select>
+            </div>
+            <div id="suspend-error" class="form-error hidden"></div>
+            <div class="modal-actions">
+              <button class="btn-secondary" id="cancel-suspend-member">취소</button>
+              <button class="btn-primary danger" id="confirm-suspend-member">차단하기</button>
             </div>
           </div>
         </div>

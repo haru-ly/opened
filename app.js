@@ -103,6 +103,19 @@ onAuthStateChanged(auth, async (user) => {
       return;
     }
 
+    // 차단(suspend) 상태 확인
+    const suspendedUntil = currentProfile?.suspendedUntil;
+    const isPermSuspended = suspendedUntil === 'permanent';
+    const suspendedMs = suspendedUntil?.toMillis ? suspendedUntil.toMillis() : 0;
+    const isTempSuspended = suspendedMs > Date.now();
+
+    if (isPermSuspended || isTempSuspended) {
+      const untilText = isPermSuspended ? '영구 차단' : `${formatDate(suspendedUntil)}까지 차단`;
+      showToast(`🚫 계정이 차단되었습니다 (${untilText}).`, 5000);
+      await signOut(auth);
+      return;
+    }
+
     await updateLastSeen(user.uid);
     showApp();
   } else {
@@ -716,25 +729,83 @@ function openChatRoom(memberUid, isAdminView, memberName) {
 
   if (unsubChat) { unsubChat(); unsubChat = null; }
 
-  unsubChat = onSnapshot(
+  let threadData = {};
+
+  unsubChat = onSnapshot(doc(db, 'chats', memberUid), (threadSnap) => {
+    threadData = threadSnap.exists() ? threadSnap.data() : {};
+    renderChatMessages();
+  });
+
+  // 메시지 + 스레드 메타(읽음 시각) 둘 다 구독하되, 메시지 쪽이 메인 트리거
+  const unsubMsgs = onSnapshot(
     query(collection(db, 'chats', memberUid, 'messages'), orderBy('createdAt', 'asc')),
     (snap) => {
-      messagesEl.innerHTML = '';
-      snap.forEach(d => {
-        const m = d.data();
-        const mine = m.senderUid === currentUser.uid;
-        const bubble = document.createElement('div');
-        bubble.className = `chat-bubble ${mine ? 'mine' : 'theirs'}`;
-        bubble.innerHTML = `${escapeHtml(m.text)}<span class="chat-bubble-time">${formatDateTime(m.createdAt)}</span>`;
-        messagesEl.appendChild(bubble);
-      });
-      messagesEl.scrollTop = messagesEl.scrollHeight;
+      window._lastChatSnap = snap;
+      renderChatMessages();
     }
   );
 
-  // 읽음 처리: 내가 이 방을 보고 있다는 표시
-  const readField = isAdminView ? 'adminUnread' : 'userUnread';
-  setDoc(doc(db, 'chats', memberUid), { [readField]: 0 }, { merge: true }).catch(() => {});
+  const prevUnsub = unsubChat;
+  unsubChat = () => { prevUnsub(); unsubMsgs(); };
+
+  function renderChatMessages() {
+    const snap = window._lastChatSnap;
+    if (!snap) return;
+    messagesEl.innerHTML = '';
+    const otherReadField = isAdminView ? 'userLastReadAt' : 'adminLastReadAt';
+    const otherReadAt = threadData[otherReadField]?.toMillis ? threadData[otherReadField].toMillis() : 0;
+
+    snap.forEach(d => {
+      const m = d.data();
+      const mine = m.senderUid === currentUser.uid;
+      const createdMs = m.createdAt?.toMillis ? m.createdAt.toMillis() : 0;
+      const withinHour = createdMs && (Date.now() - createdMs) < 3600000;
+      const isRead = mine && otherReadAt > 0 && createdMs > 0 && otherReadAt >= createdMs;
+
+      const bubble = document.createElement('div');
+      bubble.className = `chat-bubble ${mine ? 'mine' : 'theirs'}`;
+
+      if (m.deleted) {
+        bubble.classList.add('deleted');
+        bubble.innerHTML = `<span class="chat-deleted-text">삭제된 메시지입니다</span>
+          <span class="chat-bubble-time">${formatDateTime(m.createdAt)}</span>`;
+      } else {
+        const canEdit = mine && withinHour;
+        const canAdminDelete = isAdminView && currentProfile?.role === 'admin';
+        bubble.innerHTML = `
+          <span class="chat-bubble-text">${escapeHtml(m.text)}${m.editedAt ? ' <span class="chat-edited-tag">(수정됨)</span>' : ''}</span>
+          <span class="chat-bubble-time">
+            ${formatDateTime(m.createdAt)}
+            ${mine ? `<span class="chat-read-status">${isRead ? '읽음' : '전송됨'}</span>` : ''}
+          </span>
+          ${(canEdit || canAdminDelete) ? `
+          <span class="chat-bubble-actions">
+            ${canEdit ? `<button class="chat-action-btn" data-action="edit" data-id="${d.id}">수정</button>` : ''}
+            ${(canEdit || canAdminDelete) ? `<button class="chat-action-btn" data-action="delete" data-id="${d.id}">삭제</button>` : ''}
+          </span>` : ''}`;
+      }
+      messagesEl.appendChild(bubble);
+    });
+
+    // 메시지 액션 바인딩
+    messagesEl.querySelectorAll('.chat-action-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const msgId = btn.dataset.id;
+        if (btn.dataset.action === 'edit') startEditMessage(memberUid, msgId, messagesEl);
+        if (btn.dataset.action === 'delete') deleteMessage(memberUid, msgId, isAdminView && currentProfile?.role === 'admin');
+      });
+    });
+
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  // 읽음 처리: 내가 이 방을 보고 있다는 표시 (시각 기록)
+  const readField = isAdminView ? 'adminLastReadAt' : 'userLastReadAt';
+  const unreadField = isAdminView ? 'adminUnread' : 'userUnread';
+  setDoc(doc(db, 'chats', memberUid), {
+    [readField]: serverTimestamp(),
+    [unreadField]: 0,
+  }, { merge: true }).catch(() => {});
 
   if (isAdminView) {
     activeChatUid = memberUid;
@@ -748,6 +819,35 @@ function escapeHtml(str) {
   const div = document.createElement('div');
   div.textContent = str || '';
   return div.innerHTML;
+}
+
+// ── 메시지 수정 (1시간 이내, 본인만) ──
+function startEditMessage(memberUid, msgId, messagesEl) {
+  const existingBubble = [...messagesEl.children].find(el =>
+    el.querySelector(`[data-id="${msgId}"]`)
+  );
+  const textEl = existingBubble?.querySelector('.chat-bubble-text');
+  const currentText = textEl ? textEl.textContent.replace(/\(수정됨\)\s*$/, '').trim() : '';
+
+  const newText = prompt('메시지 수정', currentText);
+  if (newText === null) return; // 취소
+  if (!newText.trim()) { showToast('내용을 입력해주세요.'); return; }
+
+  updateDoc(doc(db, 'chats', memberUid, 'messages', msgId), {
+    text: newText.trim(),
+    editedAt: serverTimestamp(),
+  }).catch(e => showToast('수정 실패: ' + e.message, 3000));
+}
+
+// ── 메시지 삭제 (본인 1시간 이내 또는 관리자는 언제든) ──
+function deleteMessage(memberUid, msgId, isAdminForceDelete) {
+  if (!confirm('이 메시지를 삭제하시겠습니까?')) return;
+  updateDoc(doc(db, 'chats', memberUid, 'messages', msgId), {
+    deleted: true,
+    text: '',
+    deletedAt: serverTimestamp(),
+    deletedBy: isAdminForceDelete ? 'admin' : 'self',
+  }).catch(e => showToast('삭제 실패: ' + e.message, 3000));
 }
 
 // ── 멤버용 전송 ──
@@ -891,6 +991,20 @@ async function loadMembersTable() {
     const uid = d.id;
     const inactive = daysDiff(u.lastSeen) >= 7;
     const isSelf = uid === currentUser.uid;
+
+    const suspendedUntilMs = u.suspendedUntil?.toMillis ? u.suspendedUntil.toMillis() : 0;
+    const isPermSuspended = u.suspendedUntil === 'permanent';
+    const isSuspended = isPermSuspended || (suspendedUntilMs > Date.now());
+
+    let statusBadge;
+    if (isSuspended) {
+      statusBadge = `<span class="badge badge-red">${isPermSuspended ? '영구 차단' : '차단 중 (' + formatDate(u.suspendedUntil) + '까지)'}</span>`;
+    } else if (inactive) {
+      statusBadge = `<span class="badge badge-red">미접속</span>`;
+    } else {
+      statusBadge = `<span class="badge badge-green">활성</span>`;
+    }
+
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td>${u.name || '—'}</td>
@@ -898,13 +1012,20 @@ async function loadMembersTable() {
       <td><span class="badge ${u.role === 'admin' ? 'badge-accent' : 'badge-muted'}">${u.role === 'admin' ? '관리자' : '멤버'}</span></td>
       <td style="color:var(--text-sub)">${formatDate(u.createdAt)}</td>
       <td style="color:var(--text-sub)">${formatDate(u.lastSeen)}</td>
-      <td><span class="badge ${inactive ? 'badge-red' : 'badge-green'}">${inactive ? '미접속' : '활성'}</span></td>
+      <td>${statusBadge}</td>
       <td>
         <div class="row-actions">
           <button class="btn-icon btn-chat-member" title="채팅" data-uid="${uid}" data-name="${u.name || ''}">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
           </button>
           ${isSelf ? '' : `
+          ${isSuspended ? `
+          <button class="btn-icon btn-unsuspend-member" title="차단 해제" data-uid="${uid}" data-name="${u.name || u.email}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>
+          </button>` : `
+          <button class="btn-icon btn-suspend-member" title="차단" data-uid="${uid}" data-name="${u.name || u.email}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="4.9" y1="4.9" x2="19.1" y2="19.1"/></svg>
+          </button>`}
           <button class="btn-icon danger btn-delete-member" title="삭제" data-uid="${uid}" data-name="${u.name || u.email}">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
           </button>`}
@@ -935,6 +1056,33 @@ async function loadMembersTable() {
       $('modal-confirm-delete-member').classList.remove('hidden');
     });
   });
+
+  // 차단
+  tbody.querySelectorAll('.btn-suspend-member').forEach(btn => {
+    btn.addEventListener('click', () => {
+      $('suspend-member-text').textContent = `"${btn.dataset.name}" 님을 차단합니다.`;
+      $('modal-suspend-member').dataset.targetUid = btn.dataset.uid;
+      hide('suspend-error');
+      show('modal-suspend-member');
+      $('modal-suspend-member').classList.remove('hidden');
+    });
+  });
+
+  // 차단 해제
+  tbody.querySelectorAll('.btn-unsuspend-member').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      try {
+        await updateDoc(doc(db, 'users', btn.dataset.uid), {
+          suspendedUntil: null,
+          suspendedAt: null,
+        });
+        showToast(`✅ "${btn.dataset.name}" 님의 차단이 해제되었습니다.`);
+        loadMembersTable();
+      } catch (e) {
+        showToast('해제 실패: ' + e.message, 3000);
+      }
+    });
+  });
 }
 
 ['close-confirm-delete-modal', 'cancel-delete-member'].forEach(id => {
@@ -950,6 +1098,8 @@ $('confirm-delete-member').addEventListener('click', async () => {
     return;
   }
   try {
+    await deleteAllMemberRecords(targetUid);
+
     // Auth 계정은 클라이언트 권한상 직접 삭제 불가 → 문서를 비활성화 상태로 남겨
     // 다음 로그인 시 차단되도록 처리 (문서를 완전히 지우면 로그인 시 프로필이
     // 자동 재생성되어 비활성화가 풀리므로, 삭제하지 않고 disabled만 표시)
@@ -959,12 +1109,75 @@ $('confirm-delete-member').addEventListener('click', async () => {
       role: 'disabled', // 목록/대시보드 노출에서 제외하기 위한 표시
     }, { merge: true });
     hide('modal-confirm-delete-member');
-    showToast('🗑️ 멤버가 삭제(비활성화)되었습니다.');
+    showToast('🗑️ 멤버와 모든 기록이 삭제되었습니다.');
     loadMembersTable();
   } catch (e) {
     showToast('삭제 실패: ' + e.message, 3500);
   }
 });
+
+// ── 유저 삭제 시 연관 데이터 전체 삭제 ──
+async function deleteAllMemberRecords(uid) {
+  // 1) 출석 기록
+  const attSnap = await getDocs(query(collection(db, 'attendance'), where('uid', '==', uid)));
+  await Promise.all(attSnap.docs.map(d => deleteDoc(d.ref)));
+
+  // 2) 작사본 제출
+  const lyricsSnap = await getDocs(query(collection(db, 'lyrics'), where('uid', '==', uid)));
+  await Promise.all(lyricsSnap.docs.map(d => deleteDoc(d.ref)));
+
+  // 3) 채팅방 (메시지 전체 + 채팅방 문서)
+  const msgsSnap = await getDocs(collection(db, 'chats', uid, 'messages'));
+  await Promise.all(msgsSnap.docs.map(d => deleteDoc(d.ref)));
+  await deleteDoc(doc(db, 'chats', uid)).catch(() => {});
+
+  // 4) 모든 공지의 댓글 중 이 유저가 작성한 것
+  const noticesSnap = await getDocs(collection(db, 'notices'));
+  for (const noticeDoc of noticesSnap.docs) {
+    const commentsSnap = await getDocs(
+      query(collection(db, 'notices', noticeDoc.id, 'comments'), where('uid', '==', uid))
+    );
+    await Promise.all(commentsSnap.docs.map(c => deleteDoc(c.ref)));
+  }
+}
+
+// ── 멤버 기간제 차단 ──
+['close-suspend-modal', 'cancel-suspend-member'].forEach(id => {
+  $(id)?.addEventListener('click', () => hide('modal-suspend-member'));
+});
+
+$('confirm-suspend-member').addEventListener('click', async () => {
+  const targetUid = $('modal-suspend-member').dataset.targetUid;
+  if (!targetUid) return;
+  if (targetUid === currentUser.uid) {
+    showError('suspend-error', '본인 계정은 차단할 수 없습니다.');
+    return;
+  }
+  const days = parseInt($('suspend-duration').value, 10);
+
+  try {
+    if (days === 0) {
+      // 영구 차단
+      await updateDoc(doc(db, 'users', targetUid), {
+        suspendedUntil: 'permanent',
+        suspendedAt: serverTimestamp(),
+      });
+    } else {
+      const until = new Date(Date.now() + days * 86400000);
+      await updateDoc(doc(db, 'users', targetUid), {
+        suspendedUntil: Timestamp.fromDate(until),
+        suspendedAt: serverTimestamp(),
+      });
+    }
+    hide('modal-suspend-member');
+    showToast('🚫 멤버가 차단되었습니다.');
+    loadMembersTable();
+  } catch (e) {
+    showError('suspend-error', '차단 실패: ' + e.message);
+  }
+});
+
+
 
 async function loadAdminAttendance() {
   const container = $('admin-attendance-list');
