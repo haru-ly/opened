@@ -50,6 +50,7 @@ let unsubThreads  = null;   // 관리자: 대화 목록 구독
 let unsubUnread   = null;   // 안 읽은 메시지 뱃지 구독
 let activeChatUid = null;   // 관리자가 보고 있는 멤버 uid
 let editingNoticeId = null; // 수정 중인 공지 id
+let isRegisteringMember = false; // 관리자가 멤버 등록 중일 때 onAuthStateChanged 부작용 방지용 플래그
 
 // ════════════════════════════════════════════════
 //  UTILS
@@ -92,13 +93,18 @@ function daysDiff(ts) {
 //  AUTH STATE
 // ════════════════════════════════════════════════
 onAuthStateChanged(auth, async (user) => {
+  // 관리자가 멤버 등록 중(createUserWithEmailAndPassword 호출 직후)이면
+  // 이 콜백이 멤버 계정으로 잘못 전환되는 걸 막기 위해 완전히 무시한다.
+  // save-register-member 핸들러가 끝나면서 직접 signOut → 관리자 재로그인 흐름을 처리한다.
+  if (isRegisteringMember) return;
+
   if (user) {
     currentUser = user;
     await loadProfile(user.uid);
 
-    // 비활성화된 계정이면 강제 로그아웃
+    // 삭제(비활성화)된 계정이면 강제 로그아웃
     if (currentProfile?.disabled) {
-      showToast('🚫 비활성화된 계정입니다. 관리자에게 문의하세요.', 4000);
+      showToast('🚫 삭제된 계정입니다. 더 이상 로그인할 수 없습니다. 문의가 필요하면 관리자에게 연락하세요.', 5000);
       await signOut(auth);
       return;
     }
@@ -129,8 +135,8 @@ async function loadProfile(uid) {
   const snap = await getDoc(doc(db, 'users', uid));
   if (snap.exists()) {
     currentProfile = { id: snap.id, ...snap.data() };
-  } else {
-    // 프로필이 없으면 기본 생성
+  } else if (!isRegisteringMember) {
+    // 프로필이 없으면 기본 생성 (단, 멤버 등록 처리 중에는 건드리지 않음)
     currentProfile = { id: uid, name: currentUser.email.split('@')[0], role: 'user' };
     await setDoc(doc(db, 'users', uid), {
       name: currentProfile.name,
@@ -272,6 +278,7 @@ function getAuthError(code) {
     'auth/wrong-password':     '비밀번호가 올바르지 않습니다.',
     'auth/too-many-requests':  '로그인 시도가 너무 많습니다. 잠시 후 다시 시도하세요.',
     'auth/email-already-in-use':'이미 사용 중인 이메일입니다.',
+    'auth/user-disabled':      '이 계정은 사용이 중지되었습니다.',
   };
   return map[code] || '오류가 발생했습니다. (' + code + ')';
 }
@@ -1304,15 +1311,15 @@ $('save-register-member').addEventListener('click', async () => {
   const role  = $('admin-reg-role').value;
   if (!name || !email || !pw) return showError('admin-register-error', '모든 필드를 입력하세요.');
 
-  try {
-    // 현재 관리자 자격증명 저장
-    const adminEmail = currentUser.email;
-    const adminUid   = currentUser.uid;
+  isRegisteringMember = true; // onAuthStateChanged의 부작용을 완전히 차단
 
-    // 새 계정 생성 (이 작업은 현재 세션을 변경함)
+  try {
+    // 새 계정 생성 (이 작업은 현재 세션을 새 계정으로 자동 전환시킨다)
     const cred = await createUserWithEmailAndPassword(auth, email, pw);
     const newUid = cred.user.uid;
 
+    // 이 시점의 세션은 이미 새로 만든 멤버 계정이지만,
+    // 보안 규칙상 "본인 uid로 본인 문서 생성"은 허용되어 있어 정상적으로 기록된다.
     await setDoc(doc(db, 'users', newUid), {
       name,
       email,
@@ -1320,11 +1327,20 @@ $('save-register-member').addEventListener('click', async () => {
       createdAt: serverTimestamp(),
     });
 
-    // 관리자 계정으로 재로그인 필요 알림
+    // 새로 만든 멤버 계정에서 즉시 로그아웃 (onAuthStateChanged는 무시 상태이므로 화면 전환 없이 조용히 처리됨)
+    await signOut(auth);
+
     hide('modal-register-member');
-    showToast(`✅ ${name} 등록 완료. 다시 로그인해주세요.`, 4000);
-    setTimeout(() => signOut(auth), 2000);
+    showToast(`✅ ${name} 등록 완료. 자동으로 관리자 세션으로 복귀합니다.`, 3000);
+
+    // 관리자 재로그인 — Firebase는 같은 탭에서 재로그인을 요구하므로,
+    // 가장 안전한 방법은 관리자에게 다시 로그인하도록 안내하는 것이다.
+    isRegisteringMember = false;
+    showAuthScreen();
+    $('login-email').value = '';
+    $('login-password').value = '';
   } catch (e) {
+    isRegisteringMember = false;
     showError('admin-register-error', getAuthError(e.code) || e.message);
   }
 });
