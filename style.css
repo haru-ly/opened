@@ -1019,28 +1019,6 @@ input, textarea, select, button {
 }
 
 /* ════════════════════════════════════
-   NAV BADGE (unread chat)
-════════════════════════════════════ */
-.nav-item {
-  position: relative;
-}
-
-.nav-badge {
-  margin-left: auto;
-  background: var(--red);
-  color: #fff;
-  font-size: 10px;
-  font-weight: 700;
-  min-width: 18px;
-  height: 18px;
-  border-radius: 9px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 5px;
-}
-
-/* ════════════════════════════════════
    MODAL HEADER ACTIONS
 ════════════════════════════════════ */
 .modal-header-actions {
@@ -1072,204 +1050,57 @@ input, textarea, select, button {
 }
 
 /* ════════════════════════════════════
-   CHAT
+   TRAINEE CHECKLIST (assignment target select)
 ════════════════════════════════════ */
-.chat-layout {
-  display: block;
-}
-
-.admin-chat-layout {
-  display: grid;
-  grid-template-columns: 260px 1fr;
-  gap: 16px;
-  align-items: start;
-}
-
-.chat-thread-list {
-  max-height: 600px;
-  overflow-y: auto;
-}
-
-.chat-thread-item {
+.trainee-checklist {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition: background var(--transition);
-  margin-bottom: 4px;
-}
-
-.chat-thread-item:hover { background: var(--card-2); }
-.chat-thread-item.active { background: var(--accent-soft); }
-
-.chat-thread-avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background: var(--card-2);
+  flex-direction: column;
+  gap: 6px;
+  max-height: 200px;
+  overflow-y: auto;
   border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  background: var(--card-2);
+}
+
+.trainee-checklist-item {
   display: flex;
   align-items: center;
-  justify-content: center;
-  font-weight: 700;
+  gap: 8px;
   font-size: 13px;
-  color: var(--accent-dim);
-  flex-shrink: 0;
-}
-
-.chat-thread-info { flex: 1; min-width: 0; }
-.chat-thread-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text);
-}
-.chat-thread-preview {
-  font-size: 11px;
-  color: var(--text-sub);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 150px;
-}
-
-.chat-window {
-  display: flex;
-  flex-direction: column;
-  height: 600px;
-  padding: 0;
-  overflow: hidden;
-}
-
-.chat-window-header {
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--border);
-  font-weight: 600;
-  font-size: 14px;
   color: var(--text);
 }
 
-.chat-messages {
-  flex: 1;
-  overflow-y: auto;
-  padding: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+.trainee-checklist-item input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent-dim);
+  cursor: pointer;
 }
 
-.chat-bubble {
-  max-width: 70%;
-  padding: 10px 14px;
-  border-radius: 14px;
-  font-size: 13px;
-  line-height: 1.5;
-  word-break: break-word;
-  position: relative;
-}
-
-.chat-bubble.mine {
-  align-self: flex-end;
-  background: var(--accent);
-  color: #1A2420;
-  border-bottom-right-radius: 4px;
-}
-
-.chat-bubble.theirs {
-  align-self: flex-start;
-  background: var(--card-2);
-  color: var(--text);
-  border-bottom-left-radius: 4px;
-}
-
-.chat-bubble.deleted {
-  background: transparent;
-  border: 1px dashed var(--border);
-}
-
-.chat-deleted-text {
+.trainee-checklist-empty {
   font-size: 12px;
   color: var(--text-mute);
-  font-style: italic;
 }
 
-.chat-edited-tag {
-  font-size: 10px;
-  opacity: 0.65;
+/* ════════════════════════════════════
+   COMPANY BADGE
+════════════════════════════════════ */
+.badge-company-velique {
+  background: rgba(143,160,152,0.15);
+  color: var(--accent-dim);
+}
+.badge-company-fline {
+  background: rgba(169,143,160,0.15);
+  color: #9C6F87;
 }
 
-.chat-bubble-time {
-  font-size: 10px;
-  color: var(--text-mute);
-  margin-top: 4px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.chat-bubble.mine .chat-bubble-time { color: rgba(26,36,32,0.55); }
-
-.chat-read-status {
-  font-size: 10px;
-  font-weight: 600;
-}
-
-.chat-bubble-actions {
-  display: none;
-  gap: 8px;
-  margin-top: 6px;
-  padding-top: 6px;
-  border-top: 1px solid rgba(0,0,0,0.08);
-}
-
-.chat-bubble:hover .chat-bubble-actions {
-  display: flex;
-}
-
-.chat-action-btn {
-  background: none;
-  border: none;
-  font-size: 11px;
-  font-weight: 600;
-  color: inherit;
-  opacity: 0.7;
-  cursor: pointer;
-  padding: 0;
-  text-decoration: underline;
-}
-.chat-action-btn:hover { opacity: 1; }
-
-.chat-input-row {
-  display: flex;
-  gap: 8px;
-  padding: 14px 16px;
-  border-top: 1px solid var(--border);
-  background: var(--bg-2);
-}
-
-.chat-input-row input {
-  flex: 1;
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 10px 14px;
-  color: var(--text);
-  outline: none;
-  transition: border-color var(--transition);
-}
-
-.chat-input-row input:focus { border-color: var(--accent-dim); }
-.chat-input-row input::placeholder { color: var(--text-mute); }
-.chat-input-row input:disabled { opacity: 0.5; cursor: not-allowed; }
-
-.chat-empty-hint {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-mute);
+/* 회사 전환 셀렉트 (대표 전용) */
+#company-view-switch {
+  padding: 8px 12px;
   font-size: 13px;
+  font-weight: 600;
 }
 
 /* ════════════════════════════════════
@@ -1296,9 +1127,4 @@ input, textarea, select, button {
   .admin-tabs { overflow-x: auto; }
   .data-table { font-size: 12px; }
   .data-table th, .data-table td { padding: 8px; }
-  .admin-chat-layout {
-    grid-template-columns: 1fr;
-  }
-  .chat-thread-list { max-height: 200px; }
-  .chat-window { height: 460px; }
 }

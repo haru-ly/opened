@@ -23,12 +23,12 @@ import {
 
 // ── Firebase 초기화 ──────────────────────────────
 const firebaseConfig = {
-  apiKey: "AIzaSyCuIC2sbMdD1yEW92NNKFG_PD5fCB8TIlI",
-  authDomain: "opened-me.firebaseapp.com",
-  projectId: "opened-me",
-  storageBucket: "opened-me.firebasestorage.app",
-  messagingSenderId: "202253781297",
-  appId: "1:202253781297:web:043c0c3e82d5ba96a48810",
+  apiKey: "AIzaSyAD7cLaicDxvbiAmrCSSlF_KvDNbHQfNWg",
+  authDomain: "opened-in.firebaseapp.com",
+  projectId: "opened-in",
+  storageBucket: "opened-in.firebasestorage.app",
+  messagingSenderId: "95510565422",
+  appId: "1:95510565422:web:7719ea3dd6af60ef9bc5bf",
 };
 
 const fbApp  = initializeApp(firebaseConfig);
@@ -45,10 +45,6 @@ let calMonth      = new Date().getMonth();
 let activeNoticeId= null;
 let unsubNotices  = null;
 let unsubComments = null;
-let unsubChat     = null;   // 현재 열린 채팅방 메시지 구독
-let unsubThreads  = null;   // 관리자: 대화 목록 구독
-let unsubUnread   = null;   // 안 읽은 메시지 뱃지 구독
-let activeChatUid = null;   // 관리자가 보고 있는 멤버 uid
 let editingNoticeId = null; // 수정 중인 공지 id
 let isRegisteringMember = false; // 관리자가 멤버 등록 중일 때 onAuthStateChanged 부작용 방지용 플래그
 
@@ -87,6 +83,24 @@ function daysDiff(ts) {
   if (!ts) return 999;
   const d = ts.toDate ? ts.toDate() : new Date(ts);
   return Math.floor((Date.now() - d.getTime()) / 86400000);
+}
+
+// ── 역할/회사 체계 ──
+// role: 'trainee' | 'staff' | 'executive' | 'ceo'
+// company: 'velique' | 'fline'
+const ROLE_LABELS = { trainee: '연습생', staff: '직원', executive: '임원진', ceo: '대표' };
+const COMPANY_LABELS = { velique: 'Velique', fline: 'Fline' };
+
+function isCeo(profile)        { return profile?.role === 'ceo'; }
+function isExecutiveUp(profile){ return profile?.role === 'ceo' || profile?.role === 'executive'; }
+function canManageMembers(profile) { return isExecutiveUp(profile); } // 대표/임원진만 멤버 등록 가능
+
+// 현재 보고 있는(필터링 기준이 되는) 회사 — 대표는 전환 가능, 그 외는 본인 회사로 고정
+function getActiveCompany() {
+  if (isCeo(currentProfile)) {
+    return $('company-view-switch')?.value || currentProfile?.company || 'velique';
+  }
+  return currentProfile?.company;
 }
 
 // ════════════════════════════════════════════════
@@ -137,11 +151,12 @@ async function loadProfile(uid) {
     currentProfile = { id: snap.id, ...snap.data() };
   } else if (!isRegisteringMember) {
     // 프로필이 없으면 기본 생성 (단, 멤버 등록 처리 중에는 건드리지 않음)
-    currentProfile = { id: uid, name: currentUser.email.split('@')[0], role: 'user' };
+    currentProfile = { id: uid, name: currentUser.email.split('@')[0], role: 'trainee', company: 'velique' };
     await setDoc(doc(db, 'users', uid), {
       name: currentProfile.name,
       email: currentUser.email,
-      role: 'user',
+      role: 'trainee',
+      company: 'velique',
       createdAt: serverTimestamp(),
     });
   }
@@ -159,8 +174,6 @@ function showAuthScreen() {
   $('app-screen').classList.remove('active');
   if (unsubNotices) { unsubNotices(); unsubNotices = null; }
   if (unsubComments) { unsubComments(); unsubComments = null; }
-  if (unsubChat) { unsubChat(); unsubChat = null; }
-  if (unsubThreads) { unsubThreads(); unsubThreads = null; }
 }
 
 function showApp() {
@@ -168,35 +181,41 @@ function showApp() {
   $('app-screen').classList.add('active');
 
   // 사용자 정보 세팅
-  const name   = currentProfile?.name || '—';
-  const role   = currentProfile?.role === 'admin' ? '관리자' : '멤버';
+  const name = currentProfile?.name || '—';
+  const roleLabel = ROLE_LABELS[currentProfile?.role] || '—';
+  const companyLabel = COMPANY_LABELS[currentProfile?.company] || '';
   $('sidebar-name').textContent  = name;
-  $('sidebar-role').textContent  = role;
+  $('sidebar-role').textContent  = isCeo(currentProfile)
+    ? `${roleLabel} · 전체`
+    : `${roleLabel}${companyLabel ? ' · ' + companyLabel : ''}`;
   $('sidebar-avatar').textContent= name[0]?.toUpperCase() || '?';
 
-  // 관리자 메뉴 표시
-  const isAdmin = currentProfile?.role === 'admin';
+  // 관리 메뉴 표시 (대표/임원진만)
+  const canManage = canManageMembers(currentProfile);
   document.querySelectorAll('.admin-only').forEach(el => {
-    isAdmin ? el.classList.remove('hidden') : el.classList.add('hidden');
+    canManage ? el.classList.remove('hidden') : el.classList.add('hidden');
   });
 
-  // 채팅 메뉴 라벨 조정
-  $('chat-nav-label').textContent = isAdmin ? '1:1 채팅' : '관리자에게 문의';
-  $('chat-page-title').textContent = isAdmin ? '1:1 채팅' : '관리자에게 문의';
-  if (isAdmin) {
-    $('chat-user-view').classList.add('hidden');
-    $('chat-admin-view').classList.remove('hidden');
+  // 대표는 회사 전환 셀렉트 노출, 기본값은 본인 소속 회사
+  const switcher = $('company-view-switch');
+  if (isCeo(currentProfile)) {
+    switcher.classList.remove('hidden');
+    switcher.value = currentProfile?.company || 'velique';
   } else {
-    $('chat-user-view').classList.remove('hidden');
-    $('chat-admin-view').classList.add('hidden');
+    switcher.classList.add('hidden');
   }
 
   // 기본 페이지 로드
   navigateTo('attendance');
-
-  // 안 읽은 메시지 뱃지 구독 시작
-  subscribeUnreadBadge();
 }
+
+$('company-view-switch')?.addEventListener('change', () => {
+  // 현재 보고 있는 관리 탭을 회사 기준으로 다시 로드
+  if ($('page-admin').classList.contains('active')) {
+    const activeTab = document.querySelector('.admin-tab.active')?.dataset.tab || 'members';
+    loadAdminTab(activeTab);
+  }
+});
 
 // ════════════════════════════════════════════════
 //  NAVIGATION
@@ -214,7 +233,6 @@ function navigateTo(page) {
   if (page === 'attendance') loadAttendancePage();
   if (page === 'lyrics')     loadLyricsPage();
   if (page === 'notice')     loadNoticePage();
-  if (page === 'chat')       loadChatPage();
   if (page === 'admin')      loadAdminPage();
   if (page === 'settings')   {}  // 정적
 
@@ -373,6 +391,7 @@ async function doAttendanceCheck(dateStr, el) {
   await setDoc(docRef, {
     uid:  currentUser.uid,
     date: dateStr,
+    company: currentProfile?.company || null,
     checkedAt: serverTimestamp(),
   });
 
@@ -416,8 +435,10 @@ async function loadLyricsPage() {
   const list = $('assignments-list');
   list.innerHTML = '<div class="empty-state">로딩 중...</div>';
 
+  // 대표는 현재 보고 있는 회사 기준, 그 외는 본인 회사로 고정
+  const myCompany = isCeo(currentProfile) ? getActiveCompany() : currentProfile?.company;
   const snap = await getDocs(
-    query(collection(db, 'assignments'), orderBy('deadline', 'desc'))
+    query(collection(db, 'assignments'), where('company', '==', myCompany), orderBy('deadline', 'desc'))
   );
   if (snap.empty) {
     list.innerHTML = '<div class="empty-state">등록된 과제가 없습니다.</div>';
@@ -431,9 +452,20 @@ async function loadLyricsPage() {
   const submitted = new Set();
   mySubmissionsSnap.forEach(d => submitted.add(d.data().assignmentId));
 
+  // 임원진/대표는 같은 회사의 모든 과제를 볼 수 있고, 연습생/직원은 본인이 대상인 과제만 본다
+  const canSeeAll = isExecutiveUp(currentProfile);
+
   list.innerHTML = '';
+  let renderedCount = 0;
   snap.forEach(d => {
     const a = { id: d.id, ...d.data() };
+
+    if (!canSeeAll) {
+      // 대상이 특정 연습생으로 한정된 경우, 내가 그 목록에 없으면 숨김
+      if (a.targetMode === 'specific' && !(a.targetUids || []).includes(currentUser.uid)) return;
+    }
+
+    renderedCount++;
     const deadline  = a.deadline?.toDate ? a.deadline.toDate() : new Date(a.deadline);
     const expired   = deadline < new Date();
     const isSubmit  = submitted.has(a.id);
@@ -444,7 +476,7 @@ async function loadLyricsPage() {
       <div class="assign-topic">${a.topic}</div>
       <div class="assign-desc">${a.description || '주제에 맞는 1절 작사본을 제출하세요.'}</div>
       <div class="assign-meta">
-        <span>마감: ${deadline.toLocaleDateString('ko-KR')}</span>
+        <span>마감: ${deadline.toLocaleDateString('ko-KR')} ${a.targetMode === 'specific' ? '· 지정 대상' : ''}</span>
         <span class="badge ${isSubmit ? 'badge-accent' : expired ? 'badge-red' : 'badge-green'}">
           ${isSubmit ? '제출완료' : expired ? '마감됨' : '제출가능'}
         </span>
@@ -455,6 +487,10 @@ async function loadLyricsPage() {
     }
     list.appendChild(card);
   });
+
+  if (renderedCount === 0) {
+    list.innerHTML = '<div class="empty-state">등록된 과제가 없습니다.</div>';
+  }
 }
 
 function openLyricsModal(assignment) {
@@ -482,6 +518,7 @@ $('submit-lyrics').addEventListener('click', async () => {
     await addDoc(collection(db, 'lyrics'), {
       uid:          currentUser.uid,
       userName:     currentProfile?.name || '—',
+      company:      currentProfile?.company || null,
       assignmentId: assignId,
       content,
       submittedAt:  serverTimestamp(),
@@ -495,14 +532,55 @@ $('submit-lyrics').addEventListener('click', async () => {
 });
 
 // 과제 등록 (관리자)
-$('btn-add-assignment')?.addEventListener('click', () => {
+$('btn-add-assignment')?.addEventListener('click', async () => {
+  if (!canManageMembers(currentProfile)) {
+    showToast('🚫 과제 등록은 대표 또는 임원진만 가능합니다.');
+    return;
+  }
   $('assignment-topic').value = '';
   $('assignment-deadline').value = '';
   $('assignment-desc').value = '';
+  $('assignment-target-mode').value = 'all';
+  hide('assignment-target-trainees-wrap');
   hide('assignment-error');
+  await loadTraineeChecklist();
   show('modal-add-assignment');
   $('modal-add-assignment').classList.remove('hidden');
 });
+
+$('assignment-target-mode').addEventListener('change', () => {
+  if ($('assignment-target-mode').value === 'specific') {
+    show('assignment-target-trainees-wrap');
+  } else {
+    hide('assignment-target-trainees-wrap');
+  }
+});
+
+// 과제를 등록하는 관리자(임원진/대표)가 보고 있는 회사 소속 연습생 목록을 체크리스트로 표시
+async function loadTraineeChecklist() {
+  const wrap = $('assignment-trainee-checklist');
+  wrap.innerHTML = '<div class="trainee-checklist-empty">로딩 중...</div>';
+
+  const targetCompany = getActiveCompany();
+  const snap = await getDocs(
+    query(collection(db, 'users'), where('company', '==', targetCompany), where('role', '==', 'trainee'))
+  );
+
+  if (snap.empty) {
+    wrap.innerHTML = '<div class="trainee-checklist-empty">해당 소속에 연습생이 없습니다.</div>';
+    return;
+  }
+
+  wrap.innerHTML = '';
+  snap.forEach(d => {
+    const u = d.data();
+    if (u.disabled) return;
+    const item = document.createElement('label');
+    item.className = 'trainee-checklist-item';
+    item.innerHTML = `<input type="checkbox" value="${d.id}" /> ${u.name || u.email}`;
+    wrap.appendChild(item);
+  });
+}
 
 ['close-assignment-modal', 'cancel-assignment'].forEach(id => {
   $(id)?.addEventListener('click', () => hide('modal-add-assignment'));
@@ -512,13 +590,26 @@ $('save-assignment').addEventListener('click', async () => {
   const topic    = $('assignment-topic').value.trim();
   const deadline = $('assignment-deadline').value;
   const desc     = $('assignment-desc').value.trim();
+  const targetMode = $('assignment-target-mode').value; // 'all' | 'specific'
   if (!topic || !deadline) return showError('assignment-error', '주제와 마감일은 필수입니다.');
+
+  let targetUids = [];
+  if (targetMode === 'specific') {
+    targetUids = [...$('assignment-trainee-checklist').querySelectorAll('input[type="checkbox"]:checked')]
+      .map(cb => cb.value);
+    if (targetUids.length === 0) {
+      return showError('assignment-error', '특정 연습생을 한 명 이상 선택해주세요.');
+    }
+  }
 
   try {
     await addDoc(collection(db, 'assignments'), {
       topic,
       description: desc,
       deadline: Timestamp.fromDate(new Date(deadline + 'T23:59:59')),
+      company: getActiveCompany(),
+      targetMode,
+      targetUids,
       createdAt: serverTimestamp(),
       createdBy: currentUser.uid,
     });
@@ -537,16 +628,19 @@ function loadNoticePage() {
   const list = $('notice-list');
   list.innerHTML = '<div class="empty-state">로딩 중...</div>';
 
+  const myCompany = isCeo(currentProfile) ? getActiveCompany() : currentProfile?.company;
+
   if (unsubNotices) unsubNotices();
   unsubNotices = onSnapshot(
-    query(collection(db, 'notices'), orderBy('createdAt', 'desc')),
+    query(collection(db, 'notices'), where('company', '==', myCompany), orderBy('createdAt', 'desc')),
     (snap) => {
-      if (snap.empty) {
+      const filtered = snap.docs;
+      if (filtered.length === 0) {
         list.innerHTML = '<div class="empty-state">공지사항이 없습니다.</div>';
         return;
       }
       list.innerHTML = '';
-      snap.forEach(d => {
+      filtered.forEach(d => {
         const n = { id: d.id, ...d.data() };
         const item = document.createElement('div');
         item.className = 'notice-item';
@@ -626,8 +720,12 @@ async function submitComment() {
   $('comment-input').value = '';
 }
 
-// 공지 작성 (관리자)
+// 공지 작성 (대표/임원진)
 $('btn-add-notice')?.addEventListener('click', () => {
+  if (!canManageMembers(currentProfile)) {
+    showToast('🚫 공지 작성은 대표 또는 임원진만 가능합니다.');
+    return;
+  }
   $('notice-title-input').value = '';
   $('notice-body-input').value  = '';
   hide('notice-error');
@@ -647,6 +745,7 @@ $('save-notice').addEventListener('click', async () => {
     await addDoc(collection(db, 'notices'), {
       title,
       body,
+      company: getActiveCompany(),
       createdAt: serverTimestamp(),
       createdBy: currentUser.uid,
       authorName: currentProfile?.name || '관리자',
@@ -715,250 +814,6 @@ $('btn-delete-notice')?.addEventListener('click', async () => {
 });
 
 // ════════════════════════════════════════════════
-//  1:1 CHAT (관리자 ↔ 멤버)
-//  구조: chats/{memberUid}/messages/{msgId}
-//        chats/{memberUid} 문서 자체는 메타(lastMessage, lastAt, unread 등) 보관
-// ════════════════════════════════════════════════
-
-function loadChatPage() {
-  const isAdmin = currentProfile?.role === 'admin';
-  if (isAdmin) {
-    loadChatThreadList();
-  } else {
-    openChatRoom(currentUser.uid, false);
-  }
-}
-
-// ── 멤버용: 본인-관리자 채팅방 열기 ──
-function openChatRoom(memberUid, isAdminView, memberName) {
-  const messagesEl = isAdminView ? $('chat-messages-admin') : $('chat-messages-user');
-  messagesEl.innerHTML = '';
-
-  if (unsubChat) { unsubChat(); unsubChat = null; }
-
-  let threadData = {};
-
-  unsubChat = onSnapshot(doc(db, 'chats', memberUid), (threadSnap) => {
-    threadData = threadSnap.exists() ? threadSnap.data() : {};
-    renderChatMessages();
-  });
-
-  // 메시지 + 스레드 메타(읽음 시각) 둘 다 구독하되, 메시지 쪽이 메인 트리거
-  const unsubMsgs = onSnapshot(
-    query(collection(db, 'chats', memberUid, 'messages'), orderBy('createdAt', 'asc')),
-    (snap) => {
-      window._lastChatSnap = snap;
-      renderChatMessages();
-    }
-  );
-
-  const prevUnsub = unsubChat;
-  unsubChat = () => { prevUnsub(); unsubMsgs(); };
-
-  function renderChatMessages() {
-    const snap = window._lastChatSnap;
-    if (!snap) return;
-    messagesEl.innerHTML = '';
-    const otherReadField = isAdminView ? 'userLastReadAt' : 'adminLastReadAt';
-    const otherReadAt = threadData[otherReadField]?.toMillis ? threadData[otherReadField].toMillis() : 0;
-
-    snap.forEach(d => {
-      const m = d.data();
-      const mine = m.senderUid === currentUser.uid;
-      const createdMs = m.createdAt?.toMillis ? m.createdAt.toMillis() : 0;
-      const withinHour = createdMs && (Date.now() - createdMs) < 3600000;
-      const isRead = mine && otherReadAt > 0 && createdMs > 0 && otherReadAt >= createdMs;
-
-      const bubble = document.createElement('div');
-      bubble.className = `chat-bubble ${mine ? 'mine' : 'theirs'}`;
-
-      if (m.deleted) {
-        bubble.classList.add('deleted');
-        bubble.innerHTML = `<span class="chat-deleted-text">삭제된 메시지입니다</span>
-          <span class="chat-bubble-time">${formatDateTime(m.createdAt)}</span>`;
-      } else {
-        const canEdit = mine && withinHour;
-        const canAdminDelete = isAdminView && currentProfile?.role === 'admin';
-        bubble.innerHTML = `
-          <span class="chat-bubble-text">${escapeHtml(m.text)}${m.editedAt ? ' <span class="chat-edited-tag">(수정됨)</span>' : ''}</span>
-          <span class="chat-bubble-time">
-            ${formatDateTime(m.createdAt)}
-            ${mine ? `<span class="chat-read-status">${isRead ? '읽음' : '전송됨'}</span>` : ''}
-          </span>
-          ${(canEdit || canAdminDelete) ? `
-          <span class="chat-bubble-actions">
-            ${canEdit ? `<button class="chat-action-btn" data-action="edit" data-id="${d.id}">수정</button>` : ''}
-            ${(canEdit || canAdminDelete) ? `<button class="chat-action-btn" data-action="delete" data-id="${d.id}">삭제</button>` : ''}
-          </span>` : ''}`;
-      }
-      messagesEl.appendChild(bubble);
-    });
-
-    // 메시지 액션 바인딩
-    messagesEl.querySelectorAll('.chat-action-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const msgId = btn.dataset.id;
-        if (btn.dataset.action === 'edit') startEditMessage(memberUid, msgId, messagesEl);
-        if (btn.dataset.action === 'delete') deleteMessage(memberUid, msgId, isAdminView && currentProfile?.role === 'admin');
-      });
-    });
-
-    messagesEl.scrollTop = messagesEl.scrollHeight;
-  }
-
-  // 읽음 처리: 내가 이 방을 보고 있다는 표시 (시각 기록)
-  const readField = isAdminView ? 'adminLastReadAt' : 'userLastReadAt';
-  const unreadField = isAdminView ? 'adminUnread' : 'userUnread';
-  setDoc(doc(db, 'chats', memberUid), {
-    [readField]: serverTimestamp(),
-    [unreadField]: 0,
-  }, { merge: true }).catch(() => {});
-
-  if (isAdminView) {
-    activeChatUid = memberUid;
-    $('chat-admin-header').textContent = memberName || '대화 중';
-    $('chat-input-admin').disabled = false;
-    $('btn-send-chat-admin').disabled = false;
-  }
-}
-
-function escapeHtml(str) {
-  const div = document.createElement('div');
-  div.textContent = str || '';
-  return div.innerHTML;
-}
-
-// ── 메시지 수정 (1시간 이내, 본인만) ──
-function startEditMessage(memberUid, msgId, messagesEl) {
-  const existingBubble = [...messagesEl.children].find(el =>
-    el.querySelector(`[data-id="${msgId}"]`)
-  );
-  const textEl = existingBubble?.querySelector('.chat-bubble-text');
-  const currentText = textEl ? textEl.textContent.replace(/\(수정됨\)\s*$/, '').trim() : '';
-
-  const newText = prompt('메시지 수정', currentText);
-  if (newText === null) return; // 취소
-  if (!newText.trim()) { showToast('내용을 입력해주세요.'); return; }
-
-  updateDoc(doc(db, 'chats', memberUid, 'messages', msgId), {
-    text: newText.trim(),
-    editedAt: serverTimestamp(),
-  }).catch(e => showToast('수정 실패: ' + e.message, 3000));
-}
-
-// ── 메시지 삭제 (본인 1시간 이내 또는 관리자는 언제든) ──
-function deleteMessage(memberUid, msgId, isAdminForceDelete) {
-  if (!confirm('이 메시지를 삭제하시겠습니까?')) return;
-  updateDoc(doc(db, 'chats', memberUid, 'messages', msgId), {
-    deleted: true,
-    text: '',
-    deletedAt: serverTimestamp(),
-    deletedBy: isAdminForceDelete ? 'admin' : 'self',
-  }).catch(e => showToast('삭제 실패: ' + e.message, 3000));
-}
-
-// ── 멤버용 전송 ──
-async function sendChatMessage(memberUid, text, isAdminView) {
-  if (!text.trim()) return;
-  await addDoc(collection(db, 'chats', memberUid, 'messages'), {
-    senderUid:  currentUser.uid,
-    senderName: currentProfile?.name || '—',
-    senderRole: currentProfile?.role || 'user',
-    text:       text.trim(),
-    createdAt:  serverTimestamp(),
-  });
-
-  const unreadField = isAdminView ? 'userUnread' : 'adminUnread'; // 상대방 쪽 unread 증가
-  await setDoc(doc(db, 'chats', memberUid), {
-    lastMessage: text.trim(),
-    lastAt: serverTimestamp(),
-    memberUid,
-    memberName: isAdminView ? ($('chat-admin-header').textContent) : (currentProfile?.name || '—'),
-    [unreadField]: 1, // 단순화: 1로 마킹 (정확한 카운트 대신 "안읽음 있음" 플래그로 사용)
-  }, { merge: true });
-}
-
-$('btn-send-chat-user').addEventListener('click', () => {
-  const input = $('chat-input-user');
-  sendChatMessage(currentUser.uid, input.value, false);
-  input.value = '';
-});
-$('chat-input-user').addEventListener('keydown', e => {
-  if (e.key === 'Enter') $('btn-send-chat-user').click();
-});
-
-$('btn-send-chat-admin').addEventListener('click', () => {
-  if (!activeChatUid) return;
-  const input = $('chat-input-admin');
-  sendChatMessage(activeChatUid, input.value, true);
-  input.value = '';
-});
-$('chat-input-admin').addEventListener('keydown', e => {
-  if (e.key === 'Enter') $('btn-send-chat-admin').click();
-});
-
-// ── 관리자용: 대화 목록 ──
-function loadChatThreadList() {
-  const container = $('chat-thread-items');
-  if (unsubThreads) unsubThreads();
-
-  unsubThreads = onSnapshot(
-    query(collection(db, 'chats'), orderBy('lastAt', 'desc')),
-    (snap) => {
-      if (snap.empty) {
-        container.innerHTML = '<div class="empty-state">아직 대화가 없습니다.</div>';
-        return;
-      }
-      container.innerHTML = '';
-      snap.forEach(d => {
-        const t = d.data();
-        const memberUid = d.id;
-        const hasUnread = (t.adminUnread || 0) > 0;
-        const item = document.createElement('div');
-        item.className = `chat-thread-item${activeChatUid === memberUid ? ' active' : ''}`;
-        item.innerHTML = `
-          <div class="chat-thread-avatar">${(t.memberName || '?')[0]}</div>
-          <div class="chat-thread-info">
-            <div class="chat-thread-name">${t.memberName || memberUid}</div>
-            <div class="chat-thread-preview">${t.lastMessage || ''}</div>
-          </div>
-          ${hasUnread ? '<span class="nav-badge">N</span>' : ''}`;
-        item.addEventListener('click', () => {
-          document.querySelectorAll('.chat-thread-item').forEach(el => el.classList.remove('active'));
-          item.classList.add('active');
-          openChatRoom(memberUid, true, t.memberName);
-        });
-        container.appendChild(item);
-      });
-    }
-  );
-}
-
-// ── 사이드바 안 읽은 메시지 뱃지 ──
-function subscribeUnreadBadge() {
-  if (unsubUnread) unsubUnread();
-  const isAdmin = currentProfile?.role === 'admin';
-  const badge = $('chat-unread-badge');
-
-  if (isAdmin) {
-    // 관리자: 모든 채팅방 중 adminUnread > 0 인 게 있으면 표시
-    unsubUnread = onSnapshot(collection(db, 'chats'), (snap) => {
-      let count = 0;
-      snap.forEach(d => { if ((d.data().adminUnread || 0) > 0) count++; });
-      if (count > 0) { badge.textContent = count; badge.classList.remove('hidden'); }
-      else badge.classList.add('hidden');
-    });
-  } else {
-    // 멤버: 본인 채팅방의 userUnread 확인
-    unsubUnread = onSnapshot(doc(db, 'chats', currentUser.uid), (snap) => {
-      const unread = snap.exists() ? (snap.data().userUnread || 0) : 0;
-      if (unread > 0) { badge.textContent = unread; badge.classList.remove('hidden'); }
-      else badge.classList.add('hidden');
-    }, () => { badge.classList.add('hidden'); });
-  }
-}
-
-// ════════════════════════════════════════════════
 //  ADMIN PAGE
 // ════════════════════════════════════════════════
 async function loadAdminPage() {
@@ -985,15 +840,19 @@ async function loadAdminTab(tab) {
 
 async function loadMembersTable() {
   const tbody = $('members-tbody');
-  tbody.innerHTML = '<tr><td colspan="7" style="color:var(--text-mute)">로딩 중...</td></tr>';
-  const snap = await getDocs(query(collection(db, 'users'), orderBy('createdAt', 'desc')));
-  if (snap.empty) { tbody.innerHTML = '<tr><td colspan="7" class="empty-state">멤버 없음</td></tr>'; return; }
+  tbody.innerHTML = '<tr><td colspan="8" style="color:var(--text-mute)">로딩 중...</td></tr>';
+
+  const viewCompany = getActiveCompany();
+  const snap = await getDocs(
+    query(collection(db, 'users'), where('company', '==', viewCompany), orderBy('createdAt', 'desc'))
+  );
 
   tbody.innerHTML = '';
   let visibleCount = 0;
   snap.forEach(d => {
     const u = d.data();
     if (u.disabled) return; // 삭제(비활성화)된 멤버는 목록에서 숨김
+
     visibleCount++;
     const uid = d.id;
     const inactive = daysDiff(u.lastSeen) >= 7;
@@ -1012,19 +871,20 @@ async function loadMembersTable() {
       statusBadge = `<span class="badge badge-green">활성</span>`;
     }
 
+    const roleBadgeClass = (u.role === 'ceo' || u.role === 'executive') ? 'badge-accent' : 'badge-muted';
+    const companyBadgeClass = u.company === 'fline' ? 'badge-company-fline' : 'badge-company-velique';
+
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td>${u.name || '—'}</td>
       <td style="color:var(--text-sub)">${u.email || '—'}</td>
-      <td><span class="badge ${u.role === 'admin' ? 'badge-accent' : 'badge-muted'}">${u.role === 'admin' ? '관리자' : '멤버'}</span></td>
+      <td><span class="badge ${companyBadgeClass}">${COMPANY_LABELS[u.company] || '—'}</span></td>
+      <td><span class="badge ${roleBadgeClass}">${ROLE_LABELS[u.role] || '—'}</span></td>
       <td style="color:var(--text-sub)">${formatDate(u.createdAt)}</td>
       <td style="color:var(--text-sub)">${formatDate(u.lastSeen)}</td>
       <td>${statusBadge}</td>
       <td>
         <div class="row-actions">
-          <button class="btn-icon btn-chat-member" title="채팅" data-uid="${uid}" data-name="${u.name || ''}">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
-          </button>
           ${isSelf ? '' : `
           ${isSuspended ? `
           <button class="btn-icon btn-unsuspend-member" title="차단 해제" data-uid="${uid}" data-name="${u.name || u.email}">
@@ -1033,7 +893,7 @@ async function loadMembersTable() {
           <button class="btn-icon btn-suspend-member" title="차단" data-uid="${uid}" data-name="${u.name || u.email}">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="4.9" y1="4.9" x2="19.1" y2="19.1"/></svg>
           </button>`}
-          <button class="btn-icon danger btn-delete-member" title="삭제" data-uid="${uid}" data-name="${u.name || u.email}">
+          <button class="btn-icon danger btn-delete-member" title="삭제" data-uid="${uid}" data-name="${u.name || u.email}" data-company="${u.company || ''}">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
           </button>`}
         </div>
@@ -1042,23 +902,16 @@ async function loadMembersTable() {
   });
 
   if (visibleCount === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" class="empty-state">멤버 없음</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" class="empty-state">멤버 없음</td></tr>';
     return;
   }
-
-  // 채팅 바로가기
-  tbody.querySelectorAll('.btn-chat-member').forEach(btn => {
-    btn.addEventListener('click', () => {
-      navigateTo('chat');
-      setTimeout(() => openChatRoom(btn.dataset.uid, true, btn.dataset.name), 50);
-    });
-  });
 
   // 삭제(비활성화)
   tbody.querySelectorAll('.btn-delete-member').forEach(btn => {
     btn.addEventListener('click', () => {
       $('confirm-delete-member-text').textContent = `"${btn.dataset.name}" 님을 삭제하시겠습니까?`;
       $('modal-confirm-delete-member').dataset.targetUid = btn.dataset.uid;
+      $('modal-confirm-delete-member').dataset.targetCompany = btn.dataset.company;
       show('modal-confirm-delete-member');
       $('modal-confirm-delete-member').classList.remove('hidden');
     });
@@ -1097,7 +950,13 @@ async function loadMembersTable() {
 });
 
 $('confirm-delete-member').addEventListener('click', async () => {
+  if (!canManageMembers(currentProfile)) {
+    showToast('🚫 멤버 삭제는 대표 또는 임원진만 가능합니다.');
+    hide('modal-confirm-delete-member');
+    return;
+  }
   const targetUid = $('modal-confirm-delete-member').dataset.targetUid;
+  const targetCompany = $('modal-confirm-delete-member').dataset.targetCompany;
   if (!targetUid) return;
   if (targetUid === currentUser.uid) {
     showToast('본인 계정은 삭제할 수 없습니다.');
@@ -1105,7 +964,7 @@ $('confirm-delete-member').addEventListener('click', async () => {
     return;
   }
   try {
-    await deleteAllMemberRecords(targetUid);
+    await deleteAllMemberRecords(targetUid, targetCompany);
 
     // Auth 계정은 클라이언트 권한상 직접 삭제 불가 → 문서를 비활성화 상태로 남겨
     // 다음 로그인 시 차단되도록 처리 (문서를 완전히 지우면 로그인 시 프로필이
@@ -1124,22 +983,23 @@ $('confirm-delete-member').addEventListener('click', async () => {
 });
 
 // ── 유저 삭제 시 연관 데이터 전체 삭제 ──
-async function deleteAllMemberRecords(uid) {
-  // 1) 출석 기록
-  const attSnap = await getDocs(query(collection(db, 'attendance'), where('uid', '==', uid)));
+async function deleteAllMemberRecords(uid, targetCompany) {
+  // 1) 출석 기록 (uid + company 조건으로 규칙과 정합)
+  const attSnap = await getDocs(
+    query(collection(db, 'attendance'), where('uid', '==', uid), where('company', '==', targetCompany))
+  );
   await Promise.all(attSnap.docs.map(d => deleteDoc(d.ref)));
 
   // 2) 작사본 제출
-  const lyricsSnap = await getDocs(query(collection(db, 'lyrics'), where('uid', '==', uid)));
+  const lyricsSnap = await getDocs(
+    query(collection(db, 'lyrics'), where('uid', '==', uid), where('company', '==', targetCompany))
+  );
   await Promise.all(lyricsSnap.docs.map(d => deleteDoc(d.ref)));
 
-  // 3) 채팅방 (메시지 전체 + 채팅방 문서)
-  const msgsSnap = await getDocs(collection(db, 'chats', uid, 'messages'));
-  await Promise.all(msgsSnap.docs.map(d => deleteDoc(d.ref)));
-  await deleteDoc(doc(db, 'chats', uid)).catch(() => {});
-
-  // 4) 모든 공지의 댓글 중 이 유저가 작성한 것
-  const noticesSnap = await getDocs(collection(db, 'notices'));
+  // 3) 같은 회사 공지의 댓글 중 이 유저가 작성한 것
+  const noticesSnap = await getDocs(
+    query(collection(db, 'notices'), where('company', '==', targetCompany))
+  );
   for (const noticeDoc of noticesSnap.docs) {
     const commentsSnap = await getDocs(
       query(collection(db, 'notices', noticeDoc.id, 'comments'), where('uid', '==', uid))
@@ -1154,6 +1014,10 @@ async function deleteAllMemberRecords(uid) {
 });
 
 $('confirm-suspend-member').addEventListener('click', async () => {
+  if (!canManageMembers(currentProfile)) {
+    showError('suspend-error', '멤버 차단은 대표 또는 임원진만 가능합니다.');
+    return;
+  }
   const targetUid = $('modal-suspend-member').dataset.targetUid;
   if (!targetUid) return;
   if (targetUid === currentUser.uid) {
@@ -1190,8 +1054,9 @@ async function loadAdminAttendance() {
   const container = $('admin-attendance-list');
   container.innerHTML = '<div class="empty-state">로딩 중...</div>';
 
-  const usersSnap = await getDocs(collection(db, 'users'));
-  const attSnap   = await getDocs(collection(db, 'attendance'));
+  const viewCompany = getActiveCompany();
+  const usersSnap = await getDocs(query(collection(db, 'users'), where('company', '==', viewCompany)));
+  const attSnap   = await getDocs(query(collection(db, 'attendance'), where('company', '==', viewCompany)));
 
   const attByUser = {};
   attSnap.forEach(d => {
@@ -1201,8 +1066,13 @@ async function loadAdminAttendance() {
   });
 
   container.innerHTML = '';
+  let renderedCount = 0;
   usersSnap.forEach(d => {
     const u = { id: d.id, ...d.data() };
+    if (u.disabled) return;
+    if (u.company !== viewCompany) return;
+    renderedCount++;
+
     const dates = (attByUser[u.id] || []).sort().reverse();
 
     const block = document.createElement('div');
@@ -1219,14 +1089,19 @@ async function loadAdminAttendance() {
       </div>`;
     container.appendChild(block);
   });
+
+  if (renderedCount === 0) {
+    container.innerHTML = '<div class="empty-state">해당 소속에 멤버가 없습니다.</div>';
+  }
 }
 
 async function loadAdminLyrics() {
   const container = $('admin-lyrics-list');
   container.innerHTML = '<div class="empty-state">로딩 중...</div>';
 
-  const assignSnap  = await getDocs(collection(db, 'assignments'));
-  const lyricsSnap  = await getDocs(collection(db, 'lyrics'));
+  const viewCompany = getActiveCompany();
+  const assignSnap  = await getDocs(query(collection(db, 'assignments'), where('company', '==', viewCompany)));
+  const lyricsSnap  = await getDocs(query(collection(db, 'lyrics'), where('company', '==', viewCompany)));
 
   const lyricsByAssign = {};
   lyricsSnap.forEach(d => {
@@ -1236,12 +1111,13 @@ async function loadAdminLyrics() {
   });
 
   container.innerHTML = '';
-  if (assignSnap.empty) {
+  const visibleAssignments = assignSnap.docs.filter(d => d.data().company === viewCompany);
+  if (visibleAssignments.length === 0) {
     container.innerHTML = '<div class="empty-state">등록된 과제가 없습니다.</div>';
     return;
   }
 
-  assignSnap.forEach(d => {
+  visibleAssignments.forEach(d => {
     const a = { id: d.id, ...d.data() };
     const submissions = lyricsByAssign[a.id] || [];
     const block = document.createElement('div');
@@ -1250,6 +1126,7 @@ async function loadAdminLyrics() {
       <h4>
         ${a.topic}
         <span class="badge badge-muted">${submissions.length}개 제출</span>
+        ${a.targetMode === 'specific' ? '<span class="badge badge-accent">지정 대상</span>' : ''}
       </h4>
       ${submissions.map(s => `
         <div style="margin-top:10px;">
@@ -1267,10 +1144,12 @@ async function loadAlerts() {
   const list = $('inactive-members-list');
   list.innerHTML = '<div class="empty-state">로딩 중...</div>';
 
-  const snap = await getDocs(collection(db, 'users'));
+  const viewCompany = getActiveCompany();
+  const snap = await getDocs(query(collection(db, 'users'), where('company', '==', viewCompany)));
   const inactive = [];
   snap.forEach(d => {
     const u = { id: d.id, ...d.data() };
+    if (u.disabled) return;
     if (daysDiff(u.lastSeen) >= 7) inactive.push(u);
   });
 
@@ -1289,12 +1168,31 @@ async function loadAlerts() {
     </div>`).join('');
 }
 
-// 멤버 등록 (관리자)
+// 멤버 등록 (대표/임원진만 가능)
 $('btn-open-register')?.addEventListener('click', () => {
+  if (!canManageMembers(currentProfile)) {
+    showToast('🚫 멤버 등록은 대표 또는 임원진만 가능합니다.');
+    return;
+  }
   $('admin-reg-name').value = '';
   $('admin-reg-email').value = '';
   $('admin-reg-password').value = '';
-  $('admin-reg-role').value = 'user';
+  $('admin-reg-role').value = 'trainee';
+
+  const companySelect = $('admin-reg-company');
+  if (isCeo(currentProfile)) {
+    // 대표는 Velique/Fline 중 선택 가능, 기본값은 현재 보고 있는 회사
+    companySelect.disabled = false;
+    companySelect.value = getActiveCompany();
+  } else {
+    // 임원진은 본인 회사로 고정
+    companySelect.value = currentProfile?.company || 'velique';
+    companySelect.disabled = true;
+  }
+
+  // 대표 역할은 대표만 부여할 수 있음
+  $('reg-role-ceo-option').classList.toggle('hidden', !isCeo(currentProfile));
+
   hide('admin-register-error');
   show('modal-register-member');
   $('modal-register-member').classList.remove('hidden');
@@ -1305,11 +1203,25 @@ $('btn-open-register')?.addEventListener('click', () => {
 });
 
 $('save-register-member').addEventListener('click', async () => {
-  const name  = $('admin-reg-name').value.trim();
-  const email = $('admin-reg-email').value.trim();
-  const pw    = $('admin-reg-password').value;
-  const role  = $('admin-reg-role').value;
+  if (!canManageMembers(currentProfile)) {
+    showError('admin-register-error', '멤버 등록 권한이 없습니다.');
+    return;
+  }
+
+  const name    = $('admin-reg-name').value.trim();
+  const email   = $('admin-reg-email').value.trim();
+  const pw      = $('admin-reg-password').value;
+  const role    = $('admin-reg-role').value;
+  const company = $('admin-reg-company').value;
+
   if (!name || !email || !pw) return showError('admin-register-error', '모든 필드를 입력하세요.');
+  if (role === 'ceo' && !isCeo(currentProfile)) {
+    return showError('admin-register-error', '대표 역할은 대표만 부여할 수 있습니다.');
+  }
+  // 임원진은 본인 회사 외 다른 회사에 멤버를 등록할 수 없음
+  if (!isCeo(currentProfile) && company !== currentProfile?.company) {
+    return showError('admin-register-error', '본인 소속 회사에만 멤버를 등록할 수 있습니다.');
+  }
 
   isRegisteringMember = true; // onAuthStateChanged의 부작용을 완전히 차단
 
@@ -1324,6 +1236,7 @@ $('save-register-member').addEventListener('click', async () => {
       name,
       email,
       role,
+      company,
       createdAt: serverTimestamp(),
     });
 
