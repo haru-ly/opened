@@ -1088,12 +1088,12 @@ input, textarea, select, button {
    COMPANY BADGE
 ════════════════════════════════════ */
 .badge-company-velique {
-  background: rgba(143,160,152,0.15);
-  color: var(--accent-dim);
-}
-.badge-company-fline {
   background: rgba(169,143,160,0.15);
   color: #9C6F87;
+}
+.badge-company-fline {
+  background: rgba(143,160,152,0.15);
+  color: var(--accent-dim);
 }
 
 /* 회사 전환 셀렉트 (대표 전용) */
